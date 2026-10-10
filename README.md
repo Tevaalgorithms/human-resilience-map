@@ -1,171 +1,201 @@
-# Human Resilience Map
+# Human Resilience Map — Extreme-Heat Planning Platform
 
-A planning application for exploring extreme-heat vulnerability and cooling-center access.
-The Dash map and FastAPI backend combine versioned regional datasets, deterministic GIS and
-optimization tools, and five configurable LLM roles coordinated by LangGraph.
+> A planning application for exploring extreme-heat vulnerability and cooling-center access, built with Python, PostGIS, LangGraph and AWS.
+> Designed to **teach grounded, verifiable AI workflows** through a real-world public-health planning domain.
 
 This is a planning pilot. Scores are historical planning indices, not medical predictions.
 Recommendations depend on reviewed facility inventories, candidate suitability, capacities,
 costs and travel assumptions. Missing inputs stay visible rather than being invented.
 
-## What you can do
+---
 
-- Select a study area, county and optional map bounds; explore tract scores and indicators.
-- Ask questions in **Ask about this area**, with answers grounded in the selected dataset.
-- Run asynchronous rankings, tract explanations and cooling-site analyses; compare scenarios
-  and inspect bounded sensitivity results, verification and provenance.
-- Upload cooling-center CSVs or complete region ZIPs, review validation, then publish an
-  immutable dataset version. Download published source packages for editing or reuse.
-- Download selected-region Census/ACS data and, for Los Angeles County, an official cooling
-  inventory. Raster enrichment, reviewed candidate sites and network roads need separate preparation.
-- Review current monitoring feeds separately from the historical scoring dataset.
+## Architecture Overview
 
-## Local setup
+```mermaid
+graph TB
+    User(["🌐 Planner<br/>(Browser)"])
 
-For the full container stack, install Docker with Compose. For native development and source
-preparation, also install [uv](https://docs.astral.sh/uv/) and Python 3.11–3.13.
+    subgraph Edge["Edge"]
+        DNS["Route 53<br/>resilience.tevaalgorithms.com"]
+        Caddy["Caddy<br/>HTTPS · Reverse proxy"]
+    end
 
-1. Create your private configuration **only if `.env` does not already exist**:
+    subgraph Services["Application Services"]
+        UI["🗺️ Frontend\n:8050\nDash + Plotly"]
+        API["⚙️ API\n:8000\nFastAPI"]
+        DSP["📮 Dispatcher\nOutbox → queue"]
+        WRK["🧮 Worker\nLangGraph + GIS + OR-Tools"]
+    end
 
-   ```bash
-   cp -n .env.example .env
-   chmod 600 .env
-   ```
+    subgraph Data["Data Layer"]
+        PG[("PostgreSQL + PostGIS\ndatasets · jobs · outbox\ncheckpoints · sessions")]
+        S3[("S3 / object store\nsource packages · exports")]
+    end
 
-2. Edit `.env` locally. Set `HRM_DB_PASSWORD`, `HRM_SESSION_SECRET` and `OPENAI_API_KEY`.
-   Keep `HRM_SECRET_SOURCE=environment` and `HRM_LLM_PROVIDER=openai` for local AI testing.
-   Generate a new database password and session secret separately with:
+    subgraph AI["Model Providers"]
+        LLM["OpenAI or Amazon Bedrock\n(5 configurable roles)"]
+    end
 
-   ```bash
-   python3 -c "import secrets; print(secrets.token_urlsafe(48))"
-   ```
+    subgraph Auth["Authentication"]
+        COG["Amazon Cognito\n(cloud only)"]
+    end
 
-   If the database volume already exists, use its current database password. Changing
-   `POSTGRES_PASSWORD` in Compose does not rotate an existing PostgreSQL user's password.
-   Choose the model through `HRM_OPENAI_MODEL`; all five model roles share that configuration.
-   The explicit `HRM_LLM_PROVIDER=stub` option runs offline rules/templates without real AI.
+    User -->|HTTPS| DNS --> Caddy --> UI
+    UI -->|server-side callbacks| API
+    UI -.->|login| COG
+    API -->|read / write| PG
+    API -->|stage / publish| S3
+    API -->|"① job + outbox row (one TX)"| PG
+    DSP -->|"② poll outbox"| PG
+    DSP -->|"③ enqueue"| WRK
+    WRK -->|"④ checkpointed workflow"| PG
+    WRK -->|interpret · explain| LLM
+    WRK -->|results + provenance| PG
 
-3. Start the application:
-
-   ```bash
-   docker compose --profile app up -d --build
-   ```
-
-   Compose starts PostGIS, applies migrations, then runs the API, UI, dispatcher and worker.
-   Open **http://localhost:8050**. API documentation is at **http://localhost:8000/docs**.
-   **Check model connection** performs a small live API call and consumes tokens; model status
-   alone only checks configuration. Missing credentials and provider failures are reported explicitly.
-
-4. Publish a regional dataset using the upload panel or the preparation workflow below.
-   A fresh checkout has no bundled production datasets and does not seed fictional records.
-
-Stop the stack with `docker compose --profile app down`. Named volumes retain database and
-uploaded-source data. Provider options are set in `.env` (see `.env.example`).
-Local authentication trusts a development identity; cloud deployments require Cognito.
-
-### Native development
-
-```bash
-make install
-make db-up
-make migrate
+    style Edge fill:#ff9900,color:#000
+    style Services fill:#f1f8e9,color:#000
+    style Data fill:#e8f4fd,color:#000
+    style AI fill:#fff3e0,color:#000
 ```
 
-Run `make api`, `make frontend`, `make dispatcher` and `make worker` in separate terminals.
-The dispatcher and worker are required for asynchronous analyses. Native services load the
-project's private `.env`; its database host should be `localhost`.
+---
 
-## Regional data and uploads
+## Communication Patterns
 
-Open **Upload region data or cooling centers** beside the map:
+| Interaction | Pattern | Transport | Why |
+|---|---|---|---|
+| Browser → Frontend | **Sync** | HTTPS (Caddy) | Interactive map and tract exploration |
+| Frontend → API | **Sync REST** | HTTP | Server-side callbacks; the browser never touches the database |
+| API → Analysis job | **Async via Outbox** | PostgreSQL | Job and outbox row commit atomically; long analyses never block a request |
+| Dispatcher → Worker | **Async queue** | Local queue / SQS adapter | Decoupled execution, retryable |
+| Worker → LLM | **Sync, bounded** | HTTPS | Only request interpretation and explanation use a model |
+| Frontend → Job status | **Polling** | HTTP | Simple, resumable progress display |
 
-- **Cooling centers CSV:** select an existing study area, download the template, fill it from
-  reviewed local evidence, then validate and publish. This replaces the entire study area's
-  inventory; a nonempty CSV is marked partial. Blank capacity remains unknown.
-- **Complete region source ZIP:** enter a region ID and display name. Put `manifest.json`,
-  `tracts.geojson`, `indicators.csv`, `centers.csv` and `candidates.csv` at the ZIP root, with
-  optional `roads.json`. Review **Validate upload** before **Publish validated dataset**.
-- **Download selected dataset sources:** export the original published sources as a ZIP.
+---
 
-Source datasets under `data/` and runtime files under `.data/` are local and ignored by Git.
-If your workspace contains `data/samples/travis-region.zip`, it can be uploaded through
-**Complete region source ZIP**. It is a local real-data example, not bundled with a fresh
-checkout, and its missing cooling inventory limits site-planning conclusions.
-Synthetic data exists only under `tests/fixtures` for offline automated tests.
+## Data Flow: Analysis Request (Happy Path)
 
-For online preparation, set `HRM_CENSUS_API_KEY` and `HRM_ENABLE_PREPARATION=true` in the private
-`.env`, then recreate the API service. Select map bounds and enter the state/county FIPS in the
-UI's download controls. **Save source ZIP** exports the completed preparation. Census-only
-packages are incomplete for publication until required heat/canopy indicators are added.
-The online cooling option supports LA County (`06/037`); other regions need local inventory uploads.
-An empty provider response does not establish that no cooling centers exist.
-
-For off-host preparation:
-
-```bash
-uv sync --extra dev --extra geo
-uv run --extra geo hrm prep-census \
-  --state 48 --counties 453 --year 2023 \
-  --bbox='-97.85,30.20,-97.65,30.40' --out data/region-work
-uv run --extra geo hrm prep-enrich --dir data/region-work --years 2021,2022,2023
+```
+Step  Component           Action
+----  ------------------  -----------------------------------------------------------
+ 1.   Planner             Selects study area, asks a question, sets constraints
+ 2.   Frontend            POST /v1/analyses  →  API
+ 3.   API                 Validates request, pins dataset/model versions
+ 4.   API                 Writes job (PENDING) + outbox event atomically in one DB TX
+ 5.   API                 Returns 202 Accepted { job_id }
+ 6.   Dispatcher          Polls outbox → queues the job
+ 7.   Worker              Interprets the request into a typed plan (LLM)
+ 8.   Worker              Checks data readiness for the requested operation
+ 9.   Worker              Computes risk, access, routing and facility selection (deterministic)
+10.   Worker              Verifies geometry, bounds, capacity and solver status
+11.   Worker              Runs comparison + bounded sensitivity variants
+12.   Worker              Explains evidence (LLM), then checks claims against tool output
+13.   Worker              Saves result, provenance and verification → job COMPLETE
+14.   Frontend            Polls job → shows sites, coverage, assumptions, limitations ✅
 ```
 
-Fill inventories from reviewed evidence, add buffered pinned roads for network routing, and
-validate the sources. Region preparation covers road preparation, California transit, county packages and ZIP
-upload requirements; inventories carry status, hours, capacity, cost and confirmation metadata.
-To publish a complete validated local package into the native development database:
+## Data Flow: Missing or Infeasible Inputs
 
-```bash
-uv run hrm validate-import --dir data/region-work
-HRM_INGEST_DIR=data/region-work \
-HRM_INGEST_STUDY_AREA_ID=your-region \
-HRM_INGEST_STUDY_AREA_NAME='Your reviewed region' \
-uv run hrm ingest --source files
+```
+Step  Component           Action
+----  ------------------  -----------------------------------------------------------
+ 1-7. (same as happy path through interpretation)
+ 8.   Worker              Readiness check finds missing candidates / capacity / roads
+ 9.   Worker              Returns an explicit incomplete result listing what is missing
+10.   Data Quality Role   Explains the missing inputs and how to acquire them
+11.   Frontend            Shows "incomplete" — nothing is invented to fill the gap
 ```
 
-Native ingestion uses `.env` database/object-store settings. Container services use their own
-shared object-store volume; use the UI/API upload path when working with the container stack.
+## Data Flow: Publish a Regional Dataset
 
-## Agents and prompts
+```
+Step  Component           Action
+----  ------------------  -----------------------------------------------------------
+ 1.   Planner             Uploads cooling-centers CSV or complete region ZIP
+ 2.   API                 Stages the upload and validates every source file
+ 3.   Planner             Reviews validation report
+ 4.   API                 Publishes an immutable, versioned dataset
+ 5.   Planner             Downloads the published source package to edit or reuse
+```
 
-Five LLM roles use the configured OpenAI or Bedrock model. Their versioned prompts are in
+---
+
+## Key Architectural Patterns
+
+| Pattern | Where | What It Teaches |
+|---|---|---|
+| **LLM as interpreter, not calculator** | Worker | Models plan and explain; code computes scores, routes and optimal sites |
+| **Outbox Pattern** | API → Dispatcher | Atomic job creation and dispatch without distributed transactions |
+| **Checkpointed Workflow** | LangGraph on PostgreSQL | Resumable, inspectable multi-step jobs |
+| **Programmatic Verification** | `verification/` | Independent checks on geometry, units, bounds, capacity and solver status |
+| **Claim Grounding** | Explainer role | Unsupported generated text is replaced with a deterministic summary |
+| **Immutable Dataset Versions** | Ingestion | Results stay reproducible against the dataset and scoring version they used |
+| **Versioned Prompts** | `prompts/` | Prompt history retained for reproducibility |
+| **Secrets from SSM** | Cloud runtime | No secrets in the repo; `.env` is local only |
+
+---
+
+## Components
+
+| Component | Location | Responsibilities |
+|---|---|---|
+| **UI** | `src/resilience_map/frontend/` | Dash map, area questions, uploads, analysis results |
+| **API** | `src/resilience_map/backend/` | Authenticated data, assistant, import and job endpoints |
+| **Agent workflow** | `src/resilience_map/agents/` | Typed plans, bounded tools, LangGraph orchestration |
+| **Analytical tools** | `risk/`, `gis/`, `optimization/`, `verification/` | Reproducible calculations and checks |
+| **Data ingestion** | `src/resilience_map/ingestion/` | Acquisition, source validation, immutable publication |
+| **Persistence** | `repository/`, `db/`, `workers/` | PostGIS, migrations, queue/outbox, checkpointed jobs |
+| **Infrastructure** | `infrastructure/`, `deploy/` | Terraform and deployment utilities |
+
+The graph order is
+`interpret → validate → clarify/retrieve → readiness → analyze → verify → compare → sensitivity → explain → narrative check → finalize`.
+Readiness, scoring, routing, optimization, comparison, sensitivity and verification are deterministic code.
+See [architecture](docs/architecture.md) for details.
+
+---
+
+## LLM Roles
+
+Five roles use the configured OpenAI or Bedrock model. Prompts are versioned in
 [`src/resilience_map/prompts/`](src/resilience_map/prompts/), with `system.md` and `user.md` in each version.
 
 | Role | Active prompt | Responsibility |
-| --- | --- | --- |
+|---|---|---|
 | Request interpreter | `interpret_request/v2` | Convert analysis questions into typed requests |
 | Result explainer | `explain_results/v2` | Explain computed evidence and verified results |
 | Area question planner | `area_question_planner/v1` | Route area questions to approved read-only tools |
 | Data quality advisor | `data_quality_advisor/v1` | Explain missing inputs and acquisition steps |
 | Scenario advisor | `scenario_advisor/v1` | Suggest planning experiments and explain readiness limits |
 
-Readiness, scoring, routing, optimization, comparison, sensitivity and verification use
-deterministic code. Scenario advice does not execute a site analysis; use **Run analysis**.
 Answers carry model/prompt metadata and evidence. Numeric and identifier grounding checks can
 replace unsupported generated text with a deterministic summary; they do not verify every prose claim.
-Historical prompt versions are retained for reproducibility.
 
-## Architecture and API
+---
 
-| Component | Location | Purpose |
-| --- | --- | --- |
-| UI | `src/resilience_map/frontend/` | Dash map, area questions, uploads and analysis results |
-| API | `src/resilience_map/backend/` | Authenticated data, assistant, import and job endpoints |
-| Agent workflow | `src/resilience_map/agents/` | Typed plans, bounded tools and LangGraph orchestration |
-| Analytical tools | `risk/`, `gis/`, `optimization/`, `verification/` | Reproducible calculations and checks |
-| Data ingestion | `src/resilience_map/ingestion/` | Acquisition, source validation and immutable publication |
-| Persistence | `repository/`, `db/`, `workers/` | PostGIS, migrations, queue/outbox and checkpointed jobs |
-| Infrastructure | `infrastructure/`, `deploy/` | Terraform and deployment utilities |
+## Tech Stack
 
-The API persists jobs and an outbox; the dispatcher queues work and the worker executes the
-checkpointed workflow. Results keep dataset/scoring versions, tool evidence and verification.
-Cognito provides cloud authentication. Queue/object-store adapters support local development
-and AWS deployments. See [architecture](docs/architecture.md).
+| Layer | Technology |
+|---|---|
+| Language | Python 3.11–3.13 |
+| Frontend | Dash + Plotly |
+| API | FastAPI (Uvicorn / Gunicorn) |
+| Database | PostgreSQL 16 + PostGIS 3.4 |
+| ORM / Driver | SQLAlchemy 2.0 + psycopg 3 |
+| Workflow | LangGraph (+ Postgres checkpointer) |
+| Optimization | OR-Tools |
+| Geospatial | Shapely, PyProj, Rasterio (`geo` extra) |
+| Models | OpenAI or Amazon Bedrock (offline `stub` for tests) |
+| Auth | Local dev identity · Amazon Cognito in the cloud |
+| Infrastructure | Terraform · EC2 (Graviton) · Route 53 · S3 · ECR |
+| Containers | Docker + Docker Compose |
+| CI/CD | GitHub Actions (OIDC to AWS) |
 
-Useful authenticated endpoints include:
+---
+
+## API Endpoints
 
 | Endpoint | Purpose |
-| --- | --- |
+|---|---|
 | `POST /v1/assistant/questions` | Ask about a pinned selected area |
 | `POST /v1/analyses` | Submit an asynchronous analysis |
 | `GET /v1/model`, `POST /v1/model/check` | Model configuration status and live connection check |
@@ -174,49 +204,198 @@ Useful authenticated endpoints include:
 | `GET /v1/datasets/{version}/download` | Export a published source ZIP |
 | `POST /v1/preparations` | Start bounded online regional preparation |
 
-Use the running API's `/docs` for schemas and all routes. Local API requests use `X-Dev-User`;
-cloud requests require the configured Cognito authentication.
+Full schemas at `http://localhost:8000/docs`. Local requests use the `X-Dev-User` header;
+cloud requests require Cognito authentication.
 
-## Secrets and production
+---
 
-Local secrets belong only in the ignored `.env`. `.env.example` contains blank secret fields;
-`.env.production.example` contains non-secret selectors. Secret files, Terraform state/plan files
-and private keys are excluded from Git and Docker builds.
+## Project Structure
 
-Staging/production require `HRM_SECRET_SOURCE=ssm` and Cognito. The application reads required
-SecureString values from AWS SSM Parameter Store without falling back to `.env` credentials.
-The standalone Terraform in `infrastructure/ssm` creates five placeholder parameters and optional
-reader policies; **you apply it and enter the actual values manually in AWS**. No API key is
-provided to Terraform, and creating a placeholder does not make the application ready.
-Database/Cognito values must match the underlying credentials. Runtime AWS permissions and
-protected Terraform state are required.
+```
+human-resilience-map/
+├── README.md
+├── docker-compose.yml
+├── Dockerfile
+├── Makefile
+├── pyproject.toml / uv.lock
+├── .env.example                 # Placeholders only — never commit real secrets
+├── .env.production.example      # Non-secret production selectors
+│
+├── src/resilience_map/
+│   ├── frontend/                # Dash map and UI
+│   ├── backend/                 # FastAPI routes, auth, imports, exports
+│   ├── agents/                  # LangGraph workflow, roles, tools
+│   ├── prompts/                 # Versioned system/user prompts
+│   ├── risk/                    # Scoring
+│   ├── gis/                     # Access, routing, selection
+│   ├── optimization/            # OR-Tools coverage + scenarios
+│   ├── verification/            # Result checks and narrative grounding
+│   ├── ingestion/               # Census, heat, canopy, roads, inventory
+│   ├── repository/  db/         # Persistence + migrations
+│   ├── workers/                 # Dispatcher, consumer, checkpointing
+│   └── core/                    # Config, SSM, queue, object store, models
+│
+├── infrastructure/
+│   ├── poc/                     # Low-cost Graviton POC (Terraform) → us-west-2
+│   ├── terraform/               # ECS/RDS stack (reference)
+│   └── ssm/                     # Parameter Store definitions
+│
+├── deploy/                      # POC and Lightsail runtime configuration
+├── .github/workflows/           # CI + deploy-on-merge
+├── scripts/                     # Data download and cleanup helpers
+├── docs/                        # ADRs, architecture, deployment
+└── tests/
+    ├── unit/                    # Offline, provider-mocked tests
+    └── integration/             # Tests against local PostGIS
+```
 
-Deployment options and operational prerequisites are documented in [deployment](docs/deployment.md). Inventory review, model evaluation, security review, load testing
-and backup/restore rehearsal remain required before operational use.
+---
 
-## Checks and repository cleanup
+## Quick Start
+
+```bash
+# 1. Clone and configure
+git clone https://github.com/Tevaalgorithms/human-resilience-map.git
+cd human-resilience-map
+cp -n .env.example .env && chmod 600 .env
+
+# 2. Generate secrets, then set HRM_DB_PASSWORD, HRM_SESSION_SECRET and OPENAI_API_KEY in .env
+python3 -c "import secrets; print(secrets.token_urlsafe(48))"
+
+# 3. Start the full stack (PostGIS + migrations + API + UI + dispatcher + worker)
+make up            # or: docker compose --profile app up -d --build
+
+# 4. Open the app and the API docs
+open http://localhost:8050
+open http://localhost:8000/docs
+```
+
+Use `HRM_LLM_PROVIDER=stub` to run offline rules/templates without real AI.
+**Check model connection** in the UI makes a small live API call and consumes tokens.
+A fresh checkout has no bundled production datasets and seeds no fictional records:
+publish a regional dataset from the upload panel or the preparation workflow below.
+
+If the database volume already exists, use its current password; changing `POSTGRES_PASSWORD`
+in Compose does not rotate an existing PostgreSQL user's password.
+Stop with `docker compose --profile app down` (named volumes keep data).
+
+### Native development
+
+```bash
+make install       # uv sync --extra dev
+make db-up         # local PostGIS
+make migrate
+make api           # :8000   (separate terminals)
+make frontend      # :8050
+make dispatcher
+make worker        # dispatcher + worker are required for asynchronous analyses
+```
+
+---
+
+## Regional Data and Uploads
+
+Open **Upload region data or cooling centers** beside the map:
+
+- **Cooling centers CSV** — select a study area, download the template, fill it from reviewed local
+  evidence, validate and publish. This replaces the study area's entire inventory; blank capacity stays unknown.
+- **Complete region source ZIP** — enter a region ID and name. Put `manifest.json`, `tracts.geojson`,
+  `indicators.csv`, `centers.csv` and `candidates.csv` at the ZIP root (optional `roads.json`),
+  review **Validate upload**, then **Publish validated dataset**.
+- **Download selected dataset sources** — export the originally published sources as a ZIP.
+
+Source data under `data/` and runtime files under `.data/` are local and ignored by Git.
+Synthetic data exists only under `tests/fixtures` for offline automated tests.
+
+**Online preparation:** set `HRM_CENSUS_API_KEY` and `HRM_ENABLE_PREPARATION=true` in `.env`, recreate
+the API service, select map bounds and enter state/county FIPS. Online cooling inventory currently
+supports LA County (`06/037`); other regions need local inventory uploads. An empty provider
+response does not establish that no cooling centers exist.
+
+**Off-host preparation:**
+
+```bash
+uv sync --extra dev --extra geo
+uv run --extra geo hrm prep-census \
+  --state 48 --counties 453 --year 2023 \
+  --bbox='-97.85,30.20,-97.65,30.40' --out data/region-work
+uv run --extra geo hrm prep-enrich --dir data/region-work --years 2021,2022,2023
+
+uv run hrm validate-import --dir data/region-work
+HRM_INGEST_DIR=data/region-work \
+HRM_INGEST_STUDY_AREA_ID=your-region \
+HRM_INGEST_STUDY_AREA_NAME='Your reviewed region' \
+uv run hrm ingest --source files
+```
+
+---
+
+## Deploying to AWS (Oregon, `us-west-2`)
+
+The low-cost POC in `infrastructure/poc` creates a t4g.medium (30 GB encrypted disk), Elastic IP,
+private S3 bucket, ECR repositories, Cognito login, Route 53 record for
+**https://resilience.tevaalgorithms.com**, IAM roles and budget alerts. There is no NAT gateway, ALB,
+RDS or ECS; PostgreSQL/PostGIS runs on the host. Terraform is pinned to AWS account `702018061088`
+and refuses to run against any other account.
+
+```bash
+# One-time bootstrap (local credentials for the target account)
+terraform -chdir=infrastructure/poc/bootstrap init
+terraform -chdir=infrastructure/poc/bootstrap apply \
+  -var='github_repository=Tevaalgorithms/human-resilience-map' \
+  -var='hosted_zone_id=<ROUTE53_ZONE_ID>'
+```
+
+Then set the `POC_*` repository variables and merge to `main`; GitHub Actions validates, builds
+native ARM images, applies Terraform and deploys over OIDC — no long-lived AWS keys.
+See [deployment](docs/deployment.md) for the full runbook.
+
+---
+
+## Checks and Cleanup
 
 ```bash
 make lint        # Ruff, formatting and mypy
-make test        # offline/provider-mocked unit tests
+make test        # offline / provider-mocked unit tests
 make test-all    # also integration tests against local PostGIS
+make clean       # remove generated caches (preserves .env, .venv, data, Terraform state)
 ```
 
-Integration tests recreate a dedicated test database. Set `HRM_TEST_DATABASE_URL` to a disposable
-PostGIS database URL matching your local credentials; never point it at an application database.
-Tests use stub/mocked providers and do not require paid model calls or AWS account access.
+Integration tests recreate a dedicated test database; point `HRM_TEST_DATABASE_URL` only at a
+disposable PostGIS database. Tests use stub/mocked providers and need no paid model calls or AWS access.
 
-```bash
-python3 scripts/clean_generated.py --dry-run
-make clean
-# Optional: also remove downloaded Terraform providers/modules (init recreates them):
-python3 scripts/clean_generated.py --include-terraform --dry-run
-python3 scripts/clean_generated.py --include-terraform
-```
+---
 
-Cleanup preserves source files, migrations, prompt history, `.env`, `.venv`, datasets, runtime data,
-Terraform state and lockfiles. Run it after verification because checks recreate caches.
-Before the first GitHub upload, review the staged file list and confirm that no private files
-are included. Keep provider lockfiles and `uv.lock` for reproducible installs.
+## Learning Goals
 
-Architecture decisions: [ADR-001](docs/ADR-001.md) and [ADR-002](docs/ADR-002-terraform.md).
+After working through this project you will understand:
+
+- [x] Why an LLM should plan and explain while deterministic code computes
+- [x] How to verify AI-assisted results programmatically and report incomplete inputs honestly
+- [x] The Outbox Pattern — guaranteed job dispatch without distributed transactions
+- [x] Checkpointed LangGraph workflows backed by PostgreSQL
+- [x] Spatial analysis with PostGIS, routing and OR-Tools facility selection
+- [x] Immutable, versioned datasets and reproducible results
+- [x] Keeping secrets out of source control with SSM and GitHub OIDC
+- [x] Deploying a small Python stack to AWS with Terraform and GitHub Actions
+
+---
+
+## Production Considerations
+
+> These are documented for learning — not all are implemented in the POC.
+
+1. **Inventory Review** — Reviewed facility inventories are required before operational use
+2. **Model Evaluation** — Evaluate and select a Bedrock/OpenAI model before relying on outputs
+3. **Security Review** — Independent review and load testing before real planner use
+4. **Backup / Restore** — Rehearse database restore; POC backups are host-local scripts
+5. **Managed Database** — RDS (see `infrastructure/terraform`) replaces host PostgreSQL at scale
+6. **Edge Protection** — Add WAF, autoscaling and multi-AZ when traffic warrants
+7. **Secrets Management** — SSM SecureString / Secrets Manager replace `.env` in the cloud
+8. **Observability** — CloudWatch logs and alarms linking API and worker events by job ID
+
+Architecture decisions: [ADR-001](docs/ADR-001.md) · [ADR-002](docs/ADR-002-terraform.md)
+
+---
+
+*Built by [Tevaganthan Veluppillai](https://github.com/Tevaalgorithms) · [Medium](https://medium.com/@teva15) · [LinkedIn](https://www.linkedin.com/in/tevaganthan)*

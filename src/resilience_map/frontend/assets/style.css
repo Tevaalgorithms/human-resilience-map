@@ -431,3 +431,87 @@ label.lbl{margin-top:12px;color:var(--mute)}table.tbl th{padding:7px 10px}table.
 .methods summary{padding:14px 16px}
 footer{padding:8px 16px;font-size:12px;margin-top:12px}
 @media(max-width:700px){.topbar{padding:8px 16px}main{padding:12px 16px 4px}.kpis{gap:0}.kpi{border-bottom:1px solid var(--line)}}
+
+/* =====================================================================================
+   Enterprise polish: status strip, planning-area bar, ask card, refined surfaces.
+   Appended last so it refines the base tokens above without changing the design system.
+   ===================================================================================== */
+:root{--elev-1:0 1px 2px rgba(15,39,68,.06),0 1px 3px rgba(15,39,68,.08);--elev-2:0 4px 12px rgba(15,39,68,.12)}
+:root[data-theme="dark"]{--elev-1:0 1px 2px rgba(0,0,0,.4);--elev-2:0 6px 16px rgba(0,0,0,.5)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--elev-1:0 1px 2px rgba(0,0,0,.4);--elev-2:0 6px 16px rgba(0,0,0,.5)}}
+
+.sr-only{position:absolute!important;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+
+/* Top bar: calmer, with a brand accent line */
+.topbar{box-shadow:var(--elev-1);border-bottom:1px solid var(--line);border-top:3px solid var(--brand)}
+.brand h1{font-size:15px;letter-spacing:0;font-weight:700}
+.env-tag{font-size:11px;font-weight:700;letter-spacing:.06em;padding:3px 8px;border-radius:var(--radius-sm);border:1px solid var(--line);color:var(--mute)}
+.user-tag{font-size:12px;color:var(--mute)}
+
+/* Model status strip (replaces the large card at the top) */
+.model-strip{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:7px 24px;background:var(--surface-2);
+  border-bottom:1px solid var(--line);font-size:12px}
+.strip-label{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--mute)}
+.strip-status{display:inline-flex;align-items:center}
+.strip-msg{color:var(--mute)}
+.strip-msg:empty{display:none}
+
+/* Cards: consistent elevation and header rhythm */
+.card{box-shadow:var(--elev-1);overflow:hidden}
+.card-h{background:var(--surface);min-height:52px}
+.card-h h2{font-size:15px;letter-spacing:0}
+.kpi{box-shadow:var(--elev-1);border-left:3px solid var(--brand)}
+.kpi.accent{border-left-color:var(--bad)}
+
+/* Planning-area selection bar (sits directly above the map) */
+.selection-bar{display:flex;align-items:center;justify-content:space-between;gap:12px 20px;flex-wrap:wrap;
+  padding:10px 16px;background:var(--brand-soft);border-bottom:1px solid var(--line)}
+.sel-main{display:flex;align-items:center;gap:12px;flex-wrap:wrap;min-width:0;flex:1 1 380px}
+.sel-title{font-size:11px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--brand)}
+.sel-summary{min-width:0}
+.sel-parts{display:flex;align-items:center;gap:6px 14px;flex-wrap:wrap;font-size:13px}
+.sel-scope{font-weight:600}
+.sel-num{font-weight:700;font-variant-numeric:tabular-nums}
+.sel-pop,.sel-box{color:var(--mute);font-variant-numeric:tabular-nums}
+.sel-hint{flex-basis:100%;font-size:12px;color:var(--mute)}
+.bad-text{color:var(--bad)!important;font-weight:600}
+.badge-status{display:inline-flex;align-items:center;gap:6px;padding:2px 10px;border-radius:999px;font-size:12px;font-weight:600;border:1px solid transparent}
+.badge-status::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
+.badge-status.ok{background:var(--ok-soft);color:var(--ok)}
+.badge-status.bad{background:var(--bad-soft);color:var(--bad)}
+.badge-status.warn{background:var(--warn-soft);color:var(--warn)}
+.sel-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.sel-input{width:min(260px,100%);padding:6px 9px;border:1px solid var(--line);border-radius:var(--radius-sm);
+  background:var(--surface);color:var(--ink);font:12px var(--mono)}
+.sel-input::placeholder{color:var(--mute)}
+.btn.active{background:var(--brand);color:var(--brand-ink);border-color:var(--brand)}
+
+/* Map: modebar styling and a clearer frame */
+.map-wrap{border-top:0}
+.modebar{background:transparent!important}
+.modebar-btn{font-size:18px!important}
+.modebar-group{background:var(--surface)!important;border:1px solid var(--line);border-radius:var(--radius-sm);margin:6px 4px!important;box-shadow:var(--elev-1)}
+.modebar-btn path{fill:var(--mute)!important}
+.modebar-btn:hover path,.modebar-btn.active path{fill:var(--brand)!important}
+
+/* Ask card */
+#c-ask .card-h{background:var(--surface)}
+#c-ask .layer-chips{margin-top:2px}
+#c-ask .btn-row{margin-top:10px}
+#area-conversation .card-b{border:1px solid var(--line);border-radius:var(--radius);margin-top:12px;background:var(--surface-2)}
+#area-conversation strong{display:block;margin-bottom:6px}
+
+/* Forms and tables: tighter, more consistent */
+.dash-input-element,.dash-dropdown{min-height:34px}
+table.tbl th,table.tbl td{padding:8px 10px}
+.alert{border-radius:var(--radius-sm);border-left-width:3px;border-left-style:solid}
+.alert.info{border-left-color:var(--info)} .alert.warn{border-left-color:var(--warn)}
+.alert.error{border-left-color:var(--bad)} .alert.ok{border-left-color:var(--ok)}
+
+@media (max-width:700px){
+  .topbar,.model-strip,.page-head{padding-left:12px;padding-right:12px}
+  main{padding-left:12px;padding-right:12px}
+  .selection-bar{padding:10px 12px}
+  .sel-actions .btn{flex:1}
+}
+@media print{.topbar,.model-strip,.selection-bar,.modebar{display:none!important}}

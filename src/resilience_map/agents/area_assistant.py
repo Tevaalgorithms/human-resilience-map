@@ -16,7 +16,7 @@ from resilience_map.core.config import Settings
 from resilience_map.core.errors import ValidationFailed
 from resilience_map.core.geography import PlanningBoundingBox
 from resilience_map.core.models import DatasetBundle, ScenarioConstraints
-from resilience_map.gis.selection import select_bundle
+from resilience_map.gis.selection import MAX_SELECTION_TRACTS, select_bundle
 from resilience_map.verification.narrative import check_narrative
 from resilience_map.verification.summary import summarize
 
@@ -64,8 +64,16 @@ def answer_area(
             bundle = select_bundle(bundle, body.bbox)
         except ValueError as exc:
             raise ValidationFailed(str(exc)) from None
-    if not bundle.tracts or len(bundle.tracts) > 500:
-        raise ValidationFailed("Select an area containing between 1 and 500 tracts")
+    if not bundle.tracts:
+        raise ValidationFailed(
+            "No tracts are selected. Pick a county or draw a planning box that covers some tracts."
+        )
+    if len(bundle.tracts) > MAX_SELECTION_TRACTS:
+        raise ValidationFailed(
+            f"Your selection has {len(bundle.tracts):,} tracts; the assistant works with up to "
+            f"{MAX_SELECTION_TRACTS}. Choose a smaller county, or zoom in and draw a planning "
+            "box on the map to narrow it."
+        )
     context = {
         "study_area_id": body.study_area_id,
         "dataset_version_id": body.dataset_version_id,

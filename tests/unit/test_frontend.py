@@ -63,6 +63,14 @@ class FakeApi:
                     "sources": [{"name": "ACS", "license": "PD"}],
                 },
             }
+        if path == "/v1/selection":
+            n = 800 if params.get("county") == "06037" else 3
+            return {
+                "tracts": n,
+                "population": n * 3000,
+                "limit": 500,
+                "status": "too_many" if n > 500 else "ok",
+            }
         if path.startswith("/v1/tracts/"):
             return {
                 "tract_id": "48453000101",
@@ -175,7 +183,7 @@ def test_main_data_callbacks_end_to_end(app):
             ("synthetic-banner", "children"),
             ("map-notice", "children"),
         ],
-        [("view", "data", {"area": "a", "county": "ALL"})],
+        [("view", "data", {"area": "a", "county": "ALL"}), ("planning-bbox", "value", None)],
     )
     data = r["map-data"]["data"]
     assert len(data["tracts"]["features"]) == 3 and "Real data" in json.dumps(r["page-head"])
@@ -188,6 +196,7 @@ def test_main_data_callbacks_end_to_end(app):
             ("theme", "data", "dark"),
             ("overlay", "data", []),
             ("selected-tract", "data", None),
+            ("planning-bbox", "value", "-97.80,30.20,-97.70,30.30"),
         ],
     )
     assert fig["map"]["figure"]["layout"]["map"][
@@ -202,7 +211,11 @@ def test_main_data_callbacks_end_to_end(app):
         == 1
     )
     assert "Census tracts" in json.dumps(
-        update(c, [("kpis", "children")], [("map-data", "data", data)])
+        update(
+            c,
+            [("kpis", "children")],
+            [("map-data", "data", data), ("planning-bbox", "value", None)],
+        )
     )
     card = update(
         c,
@@ -480,7 +493,7 @@ def test_live_model_status_and_connection_callback(monkeypatch):
     app = app_mod.create_dash_app()
     client = app.server.test_client()
     result = update(client, [("model-status", "children")], [("model-poll", "n_intervals", 0)])
-    assert "gpt-5.4-mini" in json.dumps(result) and "Setup required" in json.dumps(result)
+    assert "gpt-5.4-mini" in json.dumps(result) and "API key needed" in json.dumps(result)
     result = update(client, [("model-check-output", "children")], [("check-model", "n_clicks", 1)])
     assert "Live model request succeeded" in json.dumps(result)
 
@@ -523,3 +536,36 @@ def test_area_chat_scope_followup_and_reset(monkeypatch):
     # Dash update helper uses the first input as the triggering property.
     result = update(client, outputs, [inputs[1], inputs[0], inputs[2]], states)
     assert result["area-chat"]["data"] is None
+
+
+def test_selection_summary_explains_ok_and_oversized_selection(app):
+    c = app.server.test_client()
+    small = {
+        "study_area_id": "a",
+        "county": "48453",
+        "dataset": {"id": "dv"},
+        "counties": [{"county_id": "48453", "name": "Travis County"}],
+    }
+    r = update(
+        c,
+        [("selection-summary", "children"), ("ask-scope", "children")],
+        [("map-data", "data", small), ("planning-bbox", "value", "-97.8,30.2,-97.7,30.3")],
+    )
+    text = json.dumps(r)
+    assert "Travis County" in text and "3 tracts" in text and "Ready to analyse" in text
+    assert "km" in text  # box area is shown
+    big = {**small, "county": "06037", "counties": [{"county_id": "06037", "name": "Los Angeles"}]}
+    r = update(
+        c,
+        [("selection-summary", "children"), ("ask-scope", "children")],
+        [("map-data", "data", big), ("planning-bbox", "value", None)],
+    )
+    text = json.dumps(r)
+    assert "800 tracts" in text and "Too many tracts (max 500)" in text
+    assert "Use map view" in json.dumps(r["selection-summary"])
+    bad = update(
+        c,
+        [("selection-summary", "children"), ("ask-scope", "children")],
+        [("map-data", "data", small), ("planning-bbox", "value", "not-a-box")],
+    )
+    assert "alert error" in json.dumps(bad)

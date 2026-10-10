@@ -137,6 +137,37 @@ def tracts_geojson(
     return {"type": "FeatureCollection", "features": feats, "truncated": truncated}
 
 
+def selection_summary(
+    s: Session,
+    dataset_version_id: str,
+    bbox: tuple[float, float, float, float] | None,
+    county: str | None,
+) -> dict[str, int]:
+    """Tract and population count for a county and/or box, using tract centroids.
+
+    Mirrors how analyses and the area assistant select tracts, so the number shown to the user
+    is the number that will actually be analysed.
+    """
+    where = ""
+    params: dict[str, Any] = {"dv": dataset_version_id}
+    if county:
+        where += " AND t.tract_id LIKE :cp"
+        params["cp"] = f"{county}%"
+    if bbox:
+        where += (
+            " AND ST_X(t.centroid) BETWEEN :x0 AND :x1 AND ST_Y(t.centroid) BETWEEN :y0 AND :y1"
+        )
+        params |= {"x0": bbox[0], "y0": bbox[1], "x1": bbox[2], "y1": bbox[3]}
+    row = s.execute(
+        text(
+            "SELECT count(*) AS n, COALESCE(sum(t.population), 0)::bigint AS pop "
+            f"FROM tracts t WHERE t.dataset_version_id = CAST(:dv AS uuid){where}"
+        ),
+        params,
+    ).one()
+    return {"tracts": int(row.n), "population": int(row.pop)}
+
+
 def counties_summary(
     s: Session, dataset_version_id: str, scoring_version: str
 ) -> list[dict[str, Any]]:

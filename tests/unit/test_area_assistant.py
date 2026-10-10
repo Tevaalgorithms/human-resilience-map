@@ -96,8 +96,18 @@ def test_wrong_dataset_and_empty_scope_fail_before_model_call(bundle):
     model = FakeModel("data_quality")
     with pytest.raises(ValidationFailed, match="does not match"):
         answer_area(request(), bundle, model, Settings(_env_file=None))
-    with pytest.raises(ValidationFailed, match="between 1 and 500"):
+    with pytest.raises(ValidationFailed, match="No tracts are selected"):
         run(bundle, model, county="12345")
+    assert not model.prompts
+
+
+def test_oversized_selection_explains_count_and_how_to_narrow(bundle):
+    base = bundle.tracts[0]
+    many = [base.model_copy(update={"tract_id": f"48453{i:06d}"}) for i in range(501)]
+    big = bundle.model_copy(update={"tracts": many})
+    model = FakeModel("data_quality")
+    with pytest.raises(ValidationFailed, match=r"501 tracts.*up to 500.*planning box"):
+        run(big, model)
     assert not model.prompts
 
 

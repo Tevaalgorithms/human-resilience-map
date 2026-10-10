@@ -10,7 +10,7 @@ from resilience_map.backend.deps import db_session
 from resilience_map.backend.schemas import PreparationIn
 from resilience_map.core.config import Settings, get_settings
 from resilience_map.core.geography import parse_bbox
-from resilience_map.gis.selection import select_bundle
+from resilience_map.gis.selection import MAX_SELECTION_TRACTS, select_bundle
 from resilience_map.repository import datasets as repo
 
 router = APIRouter(prefix="/v1", tags=["data"], dependencies=[Depends(current_user)])
@@ -94,6 +94,29 @@ def tracts(
             "published_at": ds["published_at"].isoformat(),
             "sources": ds["source_manifest"],
         },
+    }
+
+
+@router.get("/selection")
+def selection(
+    db: Db,
+    study_area_id: str,
+    dataset_version_id: str | None = None,
+    bbox: Annotated[str | None, Query(pattern=r"^-?\d+(\.\d+)?(,-?\d+(\.\d+)?){3}$")] = None,
+    county: Annotated[str | None, Query(pattern=r"^\d{5}$")] = None,
+) -> dict[str, Any]:
+    """How many tracts a county/box selection contains, and whether it is analysable."""
+    ds = _resolve(db, study_area_id, dataset_version_id)
+    try:
+        box = parse_bbox(bbox) if bbox else None
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    counts = repo.selection_summary(db, ds["id"], box, county)
+    n = counts["tracts"]
+    return {
+        **counts,
+        "limit": MAX_SELECTION_TRACTS,
+        "status": "empty" if n == 0 else "too_many" if n > MAX_SELECTION_TRACTS else "ok",
     }
 
 

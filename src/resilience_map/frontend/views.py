@@ -44,6 +44,53 @@ def empty_state(icon: str, title: str, body: str) -> html.Div:
     )
 
 
+def bbox_area_km2(bbox: tuple[float, float, float, float]) -> float:
+    west, south, east, north = bbox
+    mid = math.radians((south + north) / 2)
+    return abs(east - west) * 111.32 * math.cos(mid) * abs(north - south) * 110.57
+
+
+def selection_view(
+    sel: dict[str, Any] | None,
+    scope: str,
+    bbox: tuple[float, float, float, float] | None,
+    compact: bool = False,
+) -> Any:
+    """Plain-language summary of what the current county/box selection contains."""
+    if sel is None:
+        return html.Span("Choose a study area to begin.", className="muted")
+    n = sel["tracts"]
+    status = sel["status"]
+    label, cls = {
+        "ok": ("Ready to analyse", "ok"),
+        "too_many": (f"Too many tracts (max {sel['limit']})", "bad"),
+        "empty": ("No tracts selected", "warn"),
+    }[status]
+    parts: list[Any] = [
+        html.Span(scope, className="sel-scope"),
+        html.Span(f"{n:,} tracts", className="sel-num"),
+        html.Span(f"{sel['population']:,} people", className="sel-pop"),
+        html.Span(label, className=f"badge-status {cls}"),
+    ]
+    if bbox:
+        km2 = bbox_area_km2(bbox)
+        parts.append(
+            html.Span(
+                f"Box ≈ {km2:,.0f} km²",
+                className="sel-box" + (" bad-text" if km2 > 2500 else ""),
+                title="Analyses are limited to 2,500 km²",
+            )
+        )
+    if status == "too_many" and not compact:
+        hint = (
+            "Zoom in further and click “Use map view” again, or draw a smaller box."
+            if bbox
+            else "Zoom in on the map, then click “Use map view”, or draw a box."
+        )
+        parts.append(html.Span(hint, className="sel-hint"))
+    return html.Div(parts, className="sel-parts")
+
+
 def page_head(area: str, county: str | None, dataset: dict[str, Any], synthetic: bool) -> list[Any]:
     chip = html.Span(
         [html.Span(className="dot"), "Synthetic data" if synthetic else "Real data"],
@@ -212,6 +259,7 @@ def build_map(
     theme: str,
     selected_sites: list[dict[str, Any]],
     highlight: str | None,
+    bbox: tuple[float, float, float, float] | None = None,
 ) -> go.Figure:
     fig = go.Figure()
     fig.update_layout(
@@ -237,6 +285,18 @@ def build_map(
         else f"%{{customdata[1]:,.{layer.digits}f}}{layer.unit}"
     )
     names = [f["properties"]["name"].split(";")[0] for f in feats]
+    centroids = []
+    for f in feats:
+        rs = _rings(f["geometry"])
+        xs = [c[0] for ring in rs for c in ring]
+        ys = [c[1] for ring in rs for c in ring]
+        centroids.append(((min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2))
+    if bbox:
+        west, south, east, north = bbox
+        inside = [west <= x <= east and south <= y <= north for x, y in centroids]
+        opacity: Any = [0.78 if i else 0.2 for i in inside]
+    else:
+        opacity = 0.72
     fig.add_trace(
         go.Choroplethmap(
             geojson=gj,
@@ -248,7 +308,7 @@ def build_map(
             colorscale=layer.scale,
             reversescale=layer.reverse,
             showscale=False,
-            marker_opacity=0.72,
+            marker_opacity=opacity,
             marker_line_width=[3 if i == highlight else 0.4 for i in ids],
             marker_line_color=["#111827" if i == highlight else "#6b7280" for i in ids],
             customdata=[
@@ -288,6 +348,30 @@ def build_map(
                 hoverinfo="text",
             )
         )
+    if bbox:
+        west, south, east, north = bbox
+        fig.add_trace(
+            go.Scattermap(
+                lon=[west, east, east, west, west],
+                lat=[south, south, north, north, south],
+                mode="lines",
+                line={"width": 3, "color": "#0f62fe"},
+                hoverinfo="skip",
+                name="Planning box",
+            )
+        )
+    # Invisible per-tract points so the box-select tool can report the drawn range.
+    fig.add_trace(
+        go.Scattermap(
+            lon=[c[0] for c in centroids],
+            lat=[c[1] for c in centroids],
+            mode="markers",
+            marker={"size": 10, "opacity": 0.01},
+            customdata=ids,
+            hoverinfo="skip",
+            name="Tract centroids",
+        )
+    )
     lons = [c[0] for f in feats for ring in _rings(f["geometry"]) for c in ring]
     lats = [c[1] for f in feats for ring in _rings(f["geometry"]) for c in ring]
     fig.update_layout(

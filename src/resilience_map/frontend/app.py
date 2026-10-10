@@ -6,6 +6,7 @@ and wires callbacks. Rendering lives in ``views.py``.
 
 from __future__ import annotations
 
+import json
 import logging
 import uuid
 from pathlib import Path
@@ -26,6 +27,12 @@ from resilience_map.frontend.auth import api_auth_headers, install_auth
 log = logging.getLogger(__name__)
 TERMINAL = {"completed", "incomplete", "failed"}
 PANELS = ("tract", "analysis", "results")
+ASK_EXAMPLES = [
+    "Which are the top 5 most vulnerable tracts?",
+    "What data is missing here?",
+    "How should I compare cooling-center scenarios?",
+]
+
 PRESET_SITING = "Where should we open three cooling centers? Walking, 20 minutes, budget $600k"
 PRESET_RANK = "Which are the most vulnerable tracts? top 10"
 MODES = [{"label": "Walk (4.8 km/h)", "value": "walk"}, {"label": "Bike (14 km/h)", "value": "bike"},
@@ -159,43 +166,18 @@ def create_dash_app() -> dash.Dash:
                 html.Div(id="synthetic-banner"),
                 html.Div(
                     [
-                        html.Div(id="model-status", role="status"),
+                        html.Span("AI model", className="strip-label"),
+                        html.Div(id="model-status", role="status", className="strip-status"),
                         html.Button(
-                            "Check model connection",
+                            "Check connection",
                             id="check-model",
                             n_clicks=0,
-                            className="btn btn-ghost",
+                            className="btn btn-secondary btn-sm",
                         ),
-                        html.Div(id="model-check-output", role="status"),
+                        html.Div(id="model-check-output", role="status", className="strip-msg"),
                         dcc.Interval(id="model-poll", interval=30000),
                     ],
-                    className="card-b",
-                ),
-                html.Details(
-                    [
-                        html.Summary("Ask about this area"),
-                        html.P(
-                            "Choose a study area and county. The planning box, when set, narrows the selection by tract centroid. Ask about vulnerability, a tract score, missing data, or scenario ideas."
-                        ),
-                        html.P(
-                            "Examples: Which are the top 5 most vulnerable tracts? What data is missing? How should I compare cooling-center scenarios?"
-                        ),
-                        dcc.Textarea(
-                            id="area-question",
-                            placeholder="Ask a question about the selected area…",
-                            maxLength=2000,
-                            style={"width": "100%", "minHeight": "90px"},
-                        ),
-                        html.Button(
-                            "Ask area assistant",
-                            id="ask-area",
-                            n_clicks=0,
-                            className="btn btn-primary",
-                        ),
-                        dcc.Loading(html.Div(id="area-conversation", role="status")),
-                        dcc.Store(id="area-chat", storage_type="memory"),
-                    ],
-                    className="card-b",
+                    className="model-strip",
                 ),
                 html.Div(
                     [html.Div(html.Div("Study areas", className="crumbs"))],
@@ -316,12 +298,74 @@ def create_dash_app() -> dash.Dash:
                                                     className="card-h",
                                                 ),
                                                 html.Div(
+                                                    [
+                                                        html.Div(
+                                                            [
+                                                                html.Div(
+                                                                    "Planning area",
+                                                                    className="sel-title",
+                                                                ),
+                                                                html.Div(
+                                                                    id="selection-summary",
+                                                                    className="sel-summary",
+                                                                    role="status",
+                                                                ),
+                                                            ],
+                                                            className="sel-main",
+                                                        ),
+                                                        html.Div(
+                                                            [
+                                                                html.Label(
+                                                                    "Planning box (west,south,east,north)",
+                                                                    htmlFor="planning-bbox",
+                                                                    className="sr-only",
+                                                                ),
+                                                                dcc.Input(
+                                                                    id="planning-bbox",
+                                                                    type="text",
+                                                                    debounce=True,
+                                                                    placeholder="west,south,east,north",
+                                                                    className="sel-input",
+                                                                ),
+                                                                html.Button(
+                                                                    "Draw box",
+                                                                    id="draw-box",
+                                                                    n_clicks=0,
+                                                                    className="btn btn-secondary btn-sm",
+                                                                    title="Drag a rectangle on the map to select tracts",
+                                                                ),
+                                                                html.Button(
+                                                                    "Use map view",
+                                                                    id="use-bounds",
+                                                                    n_clicks=0,
+                                                                    className="btn btn-secondary btn-sm",
+                                                                    title="Select everything currently visible on the map",
+                                                                ),
+                                                                html.Button(
+                                                                    "Clear",
+                                                                    id="clear-bounds",
+                                                                    n_clicks=0,
+                                                                    className="btn btn-ghost btn-sm",
+                                                                ),
+                                                            ],
+                                                            className="sel-actions",
+                                                        ),
+                                                    ],
+                                                    className="selection-bar",
+                                                ),
+                                                html.Div(
                                                     dcc.Loading(
                                                         dcc.Graph(
                                                             id="map",
                                                             config={
-                                                                "displayModeBar": False,
+                                                                "displayModeBar": "hover",
+                                                                "displaylogo": False,
+                                                                "scrollZoom": True,
                                                                 "responsive": True,
+                                                                "modeBarButtonsToRemove": [
+                                                                    "lasso2d",
+                                                                    "toImage",
+                                                                ],
                                                             },
                                                             responsive=True,
                                                             style={
@@ -340,17 +384,8 @@ def create_dash_app() -> dash.Dash:
                                                             "Selected planning area and source readiness"
                                                         ),
                                                         html.P(
-                                                            "Zoom/pan the map, then use its bounds or enter west,south,east,north. US planning only; max 2500 km² / 500 tract centroids."
-                                                        ),
-                                                        dcc.Input(
-                                                            id="planning-bbox",
-                                                            placeholder="-97.8,30.2,-97.7,30.3",
-                                                            type="text",
-                                                        ),
-                                                        html.Button(
-                                                            "Use map bounds",
-                                                            id="use-bounds",
-                                                            n_clicks=0,
+                                                            "Uses the planning area selected above. US planning only; max 2,500 km² and 500 tract centroids.",
+                                                            className="muted small",
                                                         ),
                                                         html.Button(
                                                             "Check sources",
@@ -513,6 +548,76 @@ def create_dash_app() -> dash.Dash:
                                             ],
                                             className="card",
                                             id="c-map",
+                                        ),
+                                        html.Section(
+                                            [
+                                                html.Div(
+                                                    [
+                                                        html.H2("Ask about this area"),
+                                                        html.Div(
+                                                            id="ask-scope",
+                                                            className="sel-summary",
+                                                            role="status",
+                                                        ),
+                                                    ],
+                                                    className="card-h",
+                                                ),
+                                                html.Div(
+                                                    [
+                                                        html.P(
+                                                            "Answers use only the tracts in your planning area above: vulnerability, a tract score, missing data or scenario ideas.",
+                                                            className="muted small",
+                                                        ),
+                                                        html.Div(
+                                                            [
+                                                                html.Button(
+                                                                    text,
+                                                                    id=f"ask-ex-{i}",
+                                                                    n_clicks=0,
+                                                                    className="layer-chip",
+                                                                )
+                                                                for i, text in enumerate(
+                                                                    ASK_EXAMPLES
+                                                                )
+                                                            ],
+                                                            className="layer-chips",
+                                                            role="group",
+                                                            **{"aria-label": "Example questions"},
+                                                        ),
+                                                        dcc.Textarea(
+                                                            id="area-question",
+                                                            placeholder="Ask a question about the selected area…",
+                                                            maxLength=2000,
+                                                            style={
+                                                                "width": "100%",
+                                                                "minHeight": "84px",
+                                                                "marginTop": "10px",
+                                                            },
+                                                        ),
+                                                        html.Div(
+                                                            html.Button(
+                                                                "Ask area assistant",
+                                                                id="ask-area",
+                                                                n_clicks=0,
+                                                                className="btn btn-primary",
+                                                            ),
+                                                            className="btn-row",
+                                                        ),
+                                                        dcc.Loading(
+                                                            html.Div(
+                                                                id="area-conversation",
+                                                                role="status",
+                                                            )
+                                                        ),
+                                                        dcc.Store(
+                                                            id="area-chat", storage_type="memory"
+                                                        ),
+                                                    ],
+                                                    className="card-b",
+                                                ),
+                                            ],
+                                            className="card",
+                                            id="c-ask",
                                         ),
                                         html.Section(
                                             [
@@ -1107,14 +1212,21 @@ def create_dash_app() -> dash.Dash:
         Output("synthetic-banner", "children"),
         Output("map-notice", "children"),
         Input("view", "data"),
+        Input("planning-bbox", "value"),
     )
     @guard(4, 3)
-    def load_data(view: Any) -> Any:
+    def load_data(view: Any, bbox: str | None = None) -> Any:
         if not view:
             return None, "", None, ""
         a, area = auth(), view["area"]
         county = None if view["county"] == "ALL" else view["county"]
-        tr = api.get("/v1/tracts", a, study_area_id=area, county=county)
+        box = None
+        if bbox and bbox.strip():
+            try:
+                box = ",".join(str(v) for v in parse_bbox(bbox))
+            except ValueError:
+                box = None
+        tr = api.get("/v1/tracts", a, study_area_id=area, county=county, bbox=box)
         areas = {x["id"]: x for x in api.get("/v1/study-areas", a)}
         synthetic = areas[area]["is_synthetic"]
         data = {
@@ -1138,7 +1250,12 @@ def create_dash_app() -> dash.Dash:
         notice = ""
         if tr.get("truncated"):
             notice = views.alert(
-                "warn", html.Span("Showing the first tracts only. Choose a county to see them all.")
+                "warn",
+                html.Span(
+                    "This selection has more tracts than the map can draw, so only the first "
+                    f"{settings.max_map_features} are shown. Zoom in and click “Use map view” "
+                    "(or draw a box) to load a smaller planning area."
+                ),
             )
         elif not tr["features"]:
             notice = views.alert("info", html.Span("This selection contains no tracts."))
@@ -1152,22 +1269,40 @@ def create_dash_app() -> dash.Dash:
         Input("theme", "data"),
         Input("overlay", "data"),
         Input("selected-tract", "data"),
+        Input("planning-bbox", "value"),
     )
     def render_map(
-        data: Any, layer: str | None, theme: str | None, overlay: Any, selected: Any
+        data: Any,
+        layer: str | None,
+        theme: str | None,
+        overlay: Any,
+        selected: Any,
+        bbox: str | None = None,
     ) -> Any:
         layer = layer if layer in views.LAYERS else "score"
+        box = None
+        if bbox and bbox.strip():
+            try:
+                box = parse_bbox(bbox)
+            except ValueError:
+                box = None
         return (
-            views.build_map(data, layer, theme or "light", overlay or [], selected),
+            views.build_map(data, layer, theme or "light", overlay or [], selected, box),
             views.legend(data, layer, bool(overlay)),
         )
 
-    @app.callback(Output("kpis", "children"), Input("map-data", "data"))
-    def render_kpis(data: Any) -> Any:
+    @app.callback(
+        Output("kpis", "children"),
+        Input("map-data", "data"),
+        Input("planning-bbox", "value"),
+    )
+    def render_kpis(data: Any, bbox: str | None = None) -> Any:
         if not data:
             return views.kpis(None, "")
         names = {c["county_id"]: c["name"] for c in data["counties"]}
         scope = names.get(data["county"] or "", "") or "Whole study area"
+        if bbox and bbox.strip():
+            scope = f"{scope} · within planning box"
         return views.kpis(data, scope)
 
     @app.callback(Output("table", "data"), Input("map-data", "data"), Input("search", "value"))
@@ -1622,18 +1757,131 @@ def create_dash_app() -> dash.Dash:
         )
 
     app.clientside_callback(
-        """function(n, data) {
-          if (!n || !data) return window.dash_clientside.no_update;
-          var d = data['map._derived'] || data['mapbox._derived'];
-          if (!d || !d.coordinates) return window.dash_clientside.no_update;
-          var xs=d.coordinates.map(p=>p[0]), ys=d.coordinates.map(p=>p[1]);
-          return [Math.min(...xs),Math.min(...ys),Math.max(...xs),Math.max(...ys)].join(',');
+        """function(useN, clearN, sel, relayout) {
+          var NU = window.dash_clientside.no_update;
+          var trig = window.dash_clientside.callback_context.triggered;
+          var t = trig.length ? trig[0].prop_id : '';
+          // Largest planning box the analyses allow is 2,500 km2 and 100 km a side; if the
+          // visible area is bigger, keep its centre and shrink to a 49 x 49 km box.
+          var fmt = function(w, s, e, n) {
+            var midLat = (s + n) / 2, kmLon = 111.32 * Math.cos(midLat * Math.PI / 180), kmLat = 110.57;
+            var maxLon = 49 / kmLon, maxLat = 49 / kmLat;
+            if ((e - w) > maxLon) { var cx = (w + e) / 2; w = cx - maxLon / 2; e = cx + maxLon / 2; }
+            if ((n - s) > maxLat) { var cy = (s + n) / 2; s = cy - maxLat / 2; n = cy + maxLat / 2; }
+            return [w, s, e, n].map(function(v){ return Number(v).toFixed(4); }).join(',');
+          };
+          if (t.indexOf('clear-bounds') === 0) return ['', null];
+          if (t.indexOf('use-bounds') === 0) {
+            var d = relayout && (relayout['map._derived'] || relayout['mapbox._derived']);
+            if (d && d.coordinates) {
+              var xs = d.coordinates.map(function(p){ return p[0]; });
+              var ys = d.coordinates.map(function(p){ return p[1]; });
+              return [fmt(Math.min.apply(null, xs), Math.min.apply(null, ys),
+                          Math.max.apply(null, xs), Math.max.apply(null, ys)), NU];
+            }
+            try {
+              var gd = document.querySelector('#map .js-plotly-plot');
+              var b = gd._fullLayout.map._subplot.map.getBounds();
+              return [fmt(b.getWest(), b.getSouth(), b.getEast(), b.getNorth()), NU];
+            } catch (e) { return [NU, NU]; }
+          }
+          if (t.indexOf('selectedData') >= 0 && sel && sel.range) {
+            var r = sel.range[Object.keys(sel.range)[0]];
+            if (r && r.length === 2) {
+              return [fmt(Math.min(r[0][0], r[1][0]), Math.min(r[0][1], r[1][1]),
+                          Math.max(r[0][0], r[1][0]), Math.max(r[0][1], r[1][1])), NU];
+            }
+          }
+          return [NU, NU];
         }""",
         Output("planning-bbox", "value"),
+        Output("map", "selectedData"),
         Input("use-bounds", "n_clicks"),
+        Input("clear-bounds", "n_clicks"),
+        Input("map", "selectedData"),
         State("map", "relayoutData"),
         prevent_initial_call=True,
     )
+
+    # Draw-box mode: the button arms the map's box-select tool; finishing a box returns to pan.
+    app.clientside_callback(
+        """function(n, sel) {
+          var NU = window.dash_clientside.no_update;
+          var trig = window.dash_clientside.callback_context.triggered;
+          var t = trig.length ? trig[0].prop_id : '';
+          var gd = document.querySelector('#map .js-plotly-plot');
+          var base = 'btn btn-secondary btn-sm';
+          if (t.indexOf('draw-box') === 0 && n) {
+            if (gd && window.Plotly) { window.Plotly.relayout(gd, {dragmode: 'select'}); }
+            return base + ' active';
+          }
+          if (t.indexOf('selectedData') >= 0) {
+            if (gd && window.Plotly) { window.Plotly.relayout(gd, {dragmode: 'pan'}); }
+            return base;
+          }
+          return NU;
+        }""",
+        Output("draw-box", "className"),
+        Input("draw-box", "n_clicks"),
+        Input("map", "selectedData"),
+        prevent_initial_call=True,
+    )
+
+    # Example questions fill the question box.
+    examples_js = json.dumps({f"ask-ex-{i}": t for i, t in enumerate(ASK_EXAMPLES)})
+    app.clientside_callback(
+        "function(a, b, c) {"
+        " var NU = window.dash_clientside.no_update;"
+        " var trig = window.dash_clientside.callback_context.triggered;"
+        " if (!trig.length) return NU;"
+        " var id = trig[0].prop_id.split('.')[0];"
+        " var text = " + examples_js + "[id];"
+        " return text === undefined ? NU : text;"
+        "}",
+        Output("area-question", "value"),
+        Input("ask-ex-0", "n_clicks"),
+        Input("ask-ex-1", "n_clicks"),
+        Input("ask-ex-2", "n_clicks"),
+        prevent_initial_call=True,
+    )
+
+    @app.callback(
+        Output("selection-summary", "children"),
+        Output("ask-scope", "children"),
+        Input("map-data", "data"),
+        Input("planning-bbox", "value"),
+    )
+    @guard(2, 0)
+    def render_selection(data: Any, bbox: str | None) -> Any:
+        if not data:
+            idle = views.selection_view(None, "", None)
+            return idle, idle
+        box = None
+        if bbox and bbox.strip():
+            try:
+                box = parse_bbox(bbox)
+            except ValueError as exc:
+                bad = views.error_box(str(exc))
+                return bad, bad
+        names = {c["county_id"]: c["name"] for c in data["counties"]}
+        county = data.get("county")
+        areas = {a["id"]: a["name"] for a in api.get("/v1/study-areas", auth())}
+        scope = areas.get(data["study_area_id"], data["study_area_id"])
+        if county:
+            scope += f" · {names.get(county, county)}"
+        params: dict[str, Any] = {
+            "study_area_id": data["study_area_id"],
+            "dataset_version_id": data["dataset"]["id"],
+        }
+        if county:
+            params["county"] = county
+        if box:
+            params["bbox"] = ",".join(str(v) for v in box)
+        sel = api.get("/v1/selection", auth(), **params)
+        return (
+            views.selection_view(sel, scope, box),
+            views.selection_view(sel, scope, box, compact=True),
+        )
 
     @app.callback(
         Output("readiness-output", "children"),
@@ -1909,14 +2157,17 @@ def create_dash_app() -> dash.Dash:
     def model_status(_: int) -> Any:
         status = api.get("/v1/model", auth())
         if status["mode"] == "offline":
-            return "Offline test mode — no AI model is running."
-        label = f"AI provider: {status['provider']} · Model: {status['model']}"
-        if not status["configured"]:
-            return (
-                label
-                + " · Setup required: add the API key on the server, then restart the API and worker."
+            return html.Span(
+                [html.Span(className="dot"), "Offline test mode · no AI model running"],
+                className="chip synthetic",
             )
-        return label + " · Credentials configured. Check the connection to confirm access."
+        label = f"{status['provider']} · {status['model']}"
+        if not status["configured"]:
+            return html.Span(
+                [html.Span(className="dot"), f"{label} · API key needed"],
+                className="chip synthetic",
+            )
+        return html.Span([html.Span(className="dot"), f"Live · {label}"], className="chip real")
 
     @app.callback(
         Output("model-check-output", "children"),

@@ -352,6 +352,56 @@ See [deployment](docs/deployment.md) for the full runbook.
 
 ---
 
+## Live AWS Deployment (Lightsail, `us-west-2`)
+
+The currently running pilot is served at **https://resilience.tevaalgorithms.com** from a single
+Lightsail host using Docker Compose ([lightsail](docs/lightsail.md)). It was created with the AWS
+CLI, **not** the Terraform POC above, so none of the EC2, ECR, S3 or OIDC resources from that path
+exist. Estimated cost is about **$24/month** plus optional OpenAI usage.
+
+| Service | Resource | Purpose | Cost |
+| --- | --- | --- | --- |
+| Lightsail instance | `hrm-prod` (Ubuntu 24.04, `medium_3_0`: 2 vCPU, 4 GB RAM, 80 GB SSD) | Runs db, api, frontend, worker, dispatcher and Caddy via Compose | ~$24/mo |
+| Lightsail static IP | `hrm-prod-ip` | Fixed public IPv4 attached to `hrm-prod` | Free while attached |
+| Lightsail firewall | 80 and 443 open; 22 restricted to the admin IP | Public HTTPS and admin SSH | Free |
+| Lightsail key pair | `hrm-key` | SSH access (private key stays on the operator machine) | Free |
+| Route 53 | `A` record `resilience.tevaalgorithms.com`, alias `A` record `login.tevaalgorithms.com` and an ACM validation `CNAME`, in the existing `tevaalgorithms.com` zone | App host (static IP) and login host (Cognito CloudFront) | ~$0 |
+| Cognito user pool | `hrm-prod`, app client `hrm-prod-web`, custom domain `login.tevaalgorithms.com`, branded sign-in page (`docs/branding/`) | Login (invite-only, optional MFA) | Free tier |
+| ACM certificate (us-east-1) | `login.tevaalgorithms.com` | TLS for the Cognito custom domain (must be in us-east-1) | Free |
+| SSM Parameter Store | `/human-resilience-map/prod/{database-password,session-secret,cognito-client-secret}` (SecureString) | Application secrets | Free |
+| IAM | user `hrm-prod-host`, policy `hrm-prod-ssm-read` | Read-only access to those parameters; key kept in a mode-600 file on the host | Free |
+| AWS Budgets | `hrm-monthly-30usd` | Email alert at 80% of $30/month (alerts only, not a cap) | Free |
+
+HTTPS certificates are issued and renewed by Caddy (Let's Encrypt). Application data lives in
+Docker volumes on the host disk. There is no ECS, RDS, NAT gateway or load balancer.
+
+**Operating notes**
+
+- Signed-out visitors to `/` see a public landing page with a Sign in button; `/login` goes straight to
+  Cognito and every other path requires a session (`src/resilience_map/frontend/auth.py`).
+- The LLM provider is `stub` until an OpenAI key is stored at
+  `/human-resilience-map/prod/openai-api-key` and `HRM_LLM_PROVIDER=openai` is set in
+  `deploy/lightsail/runtime.env` on the host.
+- Host config (`runtime.env`, `.env`, `database.env`, `aws.env`) holds secrets or credentials and is not in Git.
+- Add users with `aws cognito-idp admin-create-user`; self sign-up is disabled.
+- Scheduled backups are not configured yet; see `deploy/lightsail/backup.sh` and the lightsail doc.
+
+**Tear down** (stops all charges; the Cognito pool has deletion protection enabled)
+
+```bash
+aws lightsail release-static-ip --static-ip-name hrm-prod-ip --region us-west-2
+aws lightsail delete-instance --instance-name hrm-prod --region us-west-2
+aws lightsail delete-key-pair --key-pair-name hrm-key --region us-west-2
+# delete the resilience.tevaalgorithms.com A record in Route 53
+aws ssm delete-parameters --region us-west-2 --names \
+  /human-resilience-map/prod/database-password \
+  /human-resilience-map/prod/session-secret \
+  /human-resilience-map/prod/cognito-client-secret
+# then delete the hrm-prod-host IAM user (access key, attached policy), the policy, and the budget
+```
+
+---
+
 ## Checks and Cleanup
 
 ```bash

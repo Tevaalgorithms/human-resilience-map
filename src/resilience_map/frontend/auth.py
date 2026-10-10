@@ -23,6 +23,40 @@ from resilience_map.core.db import session_scope
 COOKIE = "hrm_sid"
 PUBLIC_PATHS = ("/login", "/callback", "/logout", "/healthz", "/assets/", "/_favicon.ico")
 
+_LANDING_HTML = """<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Human Resilience Map</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+         background: #edf5ff; color: #161616;
+         font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+  main { width: min(560px, calc(100% - 32px)); background: #fff; border-radius: 8px; overflow: hidden;
+         box-shadow: 0 8px 28px rgba(28, 42, 68, 0.18); }
+  header { background: #1c2a44; color: #fff; padding: 24px 28px; }
+  header h1 { margin: 0; font-size: 26px; }
+  header p { margin: 4px 0 0; color: #a8c8ff; font-size: 15px; }
+  section { padding: 28px; }
+  section p { margin: 0 0 14px; color: #3d3d3d; }
+  a.signin { display: block; text-align: center; background: #1c2a44; color: #fff; text-decoration: none;
+             font-weight: 600; padding: 12px 16px; border-radius: 4px; margin-top: 22px; }
+  a.signin:hover, a.signin:focus-visible { background: #2b3f66; }
+  small { display: block; margin-top: 18px; color: #6f6f6f; font-size: 13px; }
+</style></head>
+<body><main>
+<header><h1>Human Resilience Map</h1><p>Extreme-heat planning &amp; cooling access</p></header>
+<section>
+  <p>A planning application for exploring extreme-heat vulnerability and cooling-center access,
+  combining versioned regional datasets with deterministic GIS and optimization tools.</p>
+  <p>Access is limited to invited planners.</p>
+  <a class="signin" href="/login">Sign in</a>
+  <small>Planning pilot. Scores are historical planning indices, not medical predictions.</small>
+</section>
+</main></body></html>
+"""
+
 
 def _create_session(data: dict[str, str], ttl: int) -> str:
     sid = secrets.token_urlsafe(32)
@@ -82,9 +116,19 @@ def install_auth(server: Flask, settings: Settings) -> None:
             return None
         if _load_session(request.cookies.get(COOKIE)):
             return None
+        if request.path == "/":
+            # Signed-out visitors get a public landing page; the app itself stays behind login.
+            return make_response(_LANDING_HTML, 200, {"Content-Type": "text/html; charset=utf-8"})
         if request.path.startswith("/_dash"):
             return make_response(jsonify(error="unauthenticated"), 401)
         return redirect("/login")
+
+    # Dash registers its own first-request setup hook (which renders the layout and needs a
+    # session) at app creation, ahead of ours. Run the login check first so signed-out visitors
+    # get the landing page or a redirect instead of a 401 from that setup.
+    hooks = server.before_request_funcs.setdefault(None, [])
+    hooks.remove(require_login)
+    hooks.insert(0, require_login)
 
     @server.get("/login")
     def login() -> Response:

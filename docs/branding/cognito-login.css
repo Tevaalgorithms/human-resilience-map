@@ -1,0 +1,13 @@
+.background-customizable { background-color: #edf5ff; }
+.banner-customizable { padding: 0; background-color: #1c2a44; }
+.logo-customizable { display: block; width: 100%; max-width: 100%; height: auto; max-height: none; margin: 0; }
+.legalText-customizable { color: #3d3d3d; }
+.textDescription-customizable { color: #1c2a44; font-size: 16px; }
+.idpDescription-customizable { color: #1c2a44; }
+.label-customizable { color: #1c2a44; font-weight: 600; }
+.inputField-customizable { border: 1px solid #a8a8a8; border-radius: 4px; color: #161616; }
+.inputField-customizable:focus { border-color: #78a9ff; box-shadow: 0 0 0 2px rgba(120,169,255,0.4); }
+.submitButton-customizable { background-color: #1c2a44; border-color: #1c2a44; border-radius: 4px; font-weight: 600; color: #ffffff; }
+.submitButton-customizable:hover { background-color: #2b3f66; border-color: #2b3f66; }
+.redirect-customizable { color: #1c2a44; }
+.errorMessage-customizable { border-radius: 4px; }

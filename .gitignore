@@ -55,3 +55,4 @@ docs/*
 !docs/architecture.md
 !docs/architecture.puml
 !docs/deployment.md
+!docs/branding/

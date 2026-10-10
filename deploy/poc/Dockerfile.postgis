@@ -1,0 +1,6 @@
+# Native ARM64 build; upstream postgis/postgis is AMD64-only.
+FROM postgres:16-bookworm
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    postgresql-16-postgis-3 postgresql-16-postgis-3-scripts \
+    && rm -rf /var/lib/apt/lists/*
+COPY postgis-init.sql /docker-entrypoint-initdb.d/10-postgis.sql

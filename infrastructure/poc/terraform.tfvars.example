@@ -1,0 +1,7 @@
+region = "us-west-2"
+hosted_zone_id = "REPLACE_WITH_EXISTING_ROUTE53_ZONE_ID"
+alert_email = "REPLACE_WITH_YOUR_EMAIL"
+domain_name = "resilience.tevaalgorithms.com"
+instance_type = "t4g.medium"
+volume_size_gb = 30
+monthly_budget_usd = 50

@@ -1,0 +1,70 @@
+name: ci
+on:
+  pull_request:
+  push: {branches: [main]}
+
+permissions: {contents: read}
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    services:
+      db:
+        image: postgis/postgis:16-3.4
+        env: {POSTGRES_DB: resilience, POSTGRES_USER: resilience, POSTGRES_PASSWORD: resilience}
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U resilience" --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Locate project
+        run: |
+          if [ -f pyproject.toml ]; then
+            echo 'APP_DIR=.' >> "$GITHUB_ENV"
+          else
+            echo 'APP_DIR=human-resilience-map' >> "$GITHUB_ENV"
+          fi
+      - uses: astral-sh/setup-uv@v5
+      - run: cd "$APP_DIR" && uv sync --frozen --extra dev
+      - run: cd "$APP_DIR" && uv run ruff check src tests scripts deploy && uv run ruff format --check src tests scripts deploy
+      - run: cd "$APP_DIR" && uv run mypy src
+      - run: cd "$APP_DIR" && uv run pytest tests --cov=resilience_map
+
+  terraform:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Locate project
+        run: |
+          if [ -f pyproject.toml ]; then
+            echo 'APP_DIR=.' >> "$GITHUB_ENV"
+          else
+            echo 'APP_DIR=human-resilience-map' >> "$GITHUB_ENV"
+          fi
+      - uses: hashicorp/setup-terraform@v3
+      - run: terraform fmt -check -recursive "$APP_DIR/infrastructure/terraform"
+      - run: terraform -chdir="$APP_DIR/infrastructure/terraform" init -backend=false
+      - run: terraform -chdir="$APP_DIR/infrastructure/terraform" validate
+
+
+  ssm-terraform:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Locate project
+        run: |
+          if [ -f pyproject.toml ]; then
+            echo 'APP_DIR=.' >> "$GITHUB_ENV"
+          else
+            echo 'APP_DIR=human-resilience-map' >> "$GITHUB_ENV"
+          fi
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.10.5
+      - name: Validate SSM Terraform with mocked AWS (no AWS account access)
+        run: |
+          terraform -chdir="$APP_DIR/infrastructure/ssm" fmt -check -recursive
+          terraform fmt -check "$APP_DIR/infrastructure/terraform/modules/ssm"
+          terraform -chdir="$APP_DIR/infrastructure/ssm" init -backend=false -input=false
+          terraform -chdir="$APP_DIR/infrastructure/ssm" validate
+          terraform -chdir="$APP_DIR/infrastructure/ssm" test

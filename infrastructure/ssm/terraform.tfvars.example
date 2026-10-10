@@ -1,0 +1,7 @@
+# Non-secret configuration only. Never put real values in Terraform variables.
+region           = "us-west-2"
+environment      = "local"
+parameter_prefix = "/human-resilience-map/local"
+# kms_key_arn = "arn:aws:kms:us-west-2:123456789012:key/your-key-id"
+# Attach read policies to existing runtime roles, if applicable:
+# reader_role_names = { api = "your-api-task-role", worker = "your-worker-task-role" }

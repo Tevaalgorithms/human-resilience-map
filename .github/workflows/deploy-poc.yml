@@ -1,0 +1,190 @@
+name: Deploy Graviton POC
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: hrm-poc-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Locate project
+        run: |
+          if [ -f pyproject.toml ]; then
+            echo 'APP_DIR=.' >> "$GITHUB_ENV"
+          else
+            test -f human-resilience-map/pyproject.toml
+            echo 'APP_DIR=human-resilience-map' >> "$GITHUB_ENV"
+          fi
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.10.5
+      - name: Validate Terraform without AWS credentials
+        run: |
+          terraform -chdir="$APP_DIR/infrastructure/poc" fmt -check -recursive
+          terraform -chdir="$APP_DIR/infrastructure/poc" init -backend=false -input=false
+          terraform -chdir="$APP_DIR/infrastructure/poc" validate
+          terraform -chdir="$APP_DIR/infrastructure/poc" test
+          terraform -chdir="$APP_DIR/infrastructure/poc/bootstrap" init -backend=false -input=false
+          terraform -chdir="$APP_DIR/infrastructure/poc/bootstrap" validate
+          terraform -chdir="$APP_DIR/infrastructure/poc/bootstrap" test
+      - name: Validate deployment configuration
+        run: |
+          cd "$APP_DIR"
+          bash -n deploy/poc/deploy.sh deploy/poc/backup.sh
+          APP_IMAGE=example/app:test POSTGIS_IMAGE=example/postgis:test APP_DOMAIN=resilience.example.org \
+            docker compose -f deploy/poc/compose.yml config --quiet
+      - uses: astral-sh/setup-uv@v5
+      - name: Run application checks
+        run: |
+          cd "$APP_DIR"
+          uv sync --frozen --extra dev
+          uv run ruff check src tests deploy/poc
+          uv run ruff format --check src tests deploy/poc
+          uv run mypy src
+          uv run pytest tests/unit
+  arm:
+    needs: validate
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - name: Locate project
+        run: |
+          if [ -f pyproject.toml ]; then
+            echo 'APP_DIR=.' >> "$GITHUB_ENV"
+          else
+            echo 'APP_DIR=human-resilience-map' >> "$GITHUB_ENV"
+          fi
+      - uses: astral-sh/setup-uv@v5
+      - name: Build native ARM images and test database workflow
+        run: |
+          cd "$APP_DIR"
+          docker build --platform linux/arm64 -t hrm-arm:test .
+          docker build --platform linux/arm64 -t hrm-postgis:test -f deploy/poc/Dockerfile.postgis deploy/poc
+          docker run -d --name hrm-db -p 5432:5432 \
+            -e POSTGRES_DB=resilience -e POSTGRES_USER=resilience -e POSTGRES_PASSWORD=test-only \
+            --health-cmd='pg_isready -U resilience -d resilience' --health-interval=5s --health-retries=30 \
+            hrm-postgis:test
+          for attempt in $(seq 1 60); do
+            [ "$(docker inspect -f '{{.State.Health.Status}}' hrm-db)" = healthy ] && break
+            sleep 2
+          done
+          test "$(docker inspect -f '{{.State.Health.Status}}' hrm-db)" = healthy
+          docker run --rm --network host -e HRM_DB_PASSWORD=test-only hrm-arm:test migrate-and-seed
+          uv sync --frozen --extra dev
+          HRM_TEST_DATABASE_URL=postgresql+psycopg://resilience:test-only@localhost:5432/resilience_test \
+            uv run pytest tests
+      - name: Save verified images
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        run: docker save hrm-arm:test hrm-postgis:test | gzip > /tmp/hrm-images.tar.gz
+      - uses: actions/upload-artifact@v4
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        with:
+          name: hrm-arm-images
+          path: /tmp/hrm-images.tar.gz
+          retention-days: 1
+  deploy:
+    needs: [validate, arm]
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'us-west-2' }}
+      TF_IN_AUTOMATION: 'true'
+      TF_VAR_region: ${{ vars.AWS_REGION || 'us-west-2' }}
+      TF_VAR_hosted_zone_id: ${{ vars.POC_HOSTED_ZONE_ID }}
+      TF_VAR_alert_email: ${{ vars.POC_ALERT_EMAIL }}
+      TF_VAR_domain_name: ${{ vars.POC_DOMAIN_NAME || 'resilience.tevaalgorithms.com' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Locate project and require bootstrap settings
+        env:
+          DEPLOY_ROLE: ${{ vars.POC_DEPLOY_ROLE_ARN }}
+          STATE_BUCKET: ${{ vars.POC_STATE_BUCKET }}
+        run: |
+          test -n "$DEPLOY_ROLE" && test -n "$STATE_BUCKET"
+          test -n "$TF_VAR_hosted_zone_id" && test -n "$TF_VAR_alert_email"
+          if [ -f pyproject.toml ]; then
+            echo 'APP_DIR=.' >> "$GITHUB_ENV"
+          else
+            echo 'APP_DIR=human-resilience-map' >> "$GITHUB_ENV"
+          fi
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.POC_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-duration-seconds: 7200
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.10.5
+          terraform_wrapper: false
+      - name: Plan and apply POC infrastructure
+        env:
+          STATE_BUCKET: ${{ vars.POC_STATE_BUCKET }}
+        run: |
+          cd "$APP_DIR"
+          terraform -chdir=infrastructure/poc init -input=false \
+            -backend-config="bucket=$STATE_BUCKET" \
+            -backend-config="key=poc/terraform.tfstate" \
+            -backend-config="region=$AWS_REGION" -backend-config=encrypt=true
+          terraform -chdir=infrastructure/poc plan -input=false -lock-timeout=5m -out=poc.tfplan
+          terraform -chdir=infrastructure/poc apply -input=false poc.tfplan
+          terraform -chdir=infrastructure/poc output -json > /tmp/hrm-outputs.json
+      - uses: actions/download-artifact@v4
+        with:
+          name: hrm-arm-images
+          path: /tmp/hrm-images
+      - uses: aws-actions/amazon-ecr-login@v2
+      - name: Publish verified images and release bundle
+        run: |
+          cd "$APP_DIR"
+          docker load -i /tmp/hrm-images/hrm-images.tar.gz
+          python3 - <<'PY'
+          import json, os
+          outputs = json.load(open('/tmp/hrm-outputs.json'))
+          get = lambda key: outputs[key]['value']
+          # Run ID permits safe workflow re-runs while keeping ECR tags immutable.
+          tag = os.environ['GITHUB_SHA'] + '-' + os.environ['GITHUB_RUN_ID'] + '-' + os.environ['GITHUB_RUN_ATTEMPT']
+          release = {
+              'app_image': get('app_repository') + ':' + tag,
+              'postgis_image': get('postgis_repository') + ':' + tag,
+              'region': os.environ['AWS_REGION'], 'domain': os.environ['TF_VAR_domain_name'],
+              'bucket': get('data_bucket'), 'ssm_parameter_prefix': get('ssm_parameter_prefix'),
+              'config': get('runtime_config'),
+          }
+          with open('deploy/poc/release.json', 'w') as f:
+              json.dump(release, f)
+          with open(os.environ['GITHUB_ENV'], 'a') as f:
+              f.write('INSTANCE_ID=' + get('instance_id') + '\n')
+              f.write('DATA_BUCKET=' + get('data_bucket') + '\n')
+              f.write('APP_IMAGE=' + release['app_image'] + '\n')
+              f.write('POSTGIS_IMAGE=' + release['postgis_image'] + '\n')
+          PY
+          APP_IMAGE=$(python3 -c 'import json; print(json.load(open("deploy/poc/release.json"))["app_image"])')
+          POSTGIS_IMAGE=$(python3 -c 'import json; print(json.load(open("deploy/poc/release.json"))["postgis_image"])')
+          docker tag hrm-arm:test "$APP_IMAGE"
+          docker tag hrm-postgis:test "$POSTGIS_IMAGE"
+          docker push "$APP_IMAGE"
+          docker push "$POSTGIS_IMAGE"
+          tar -czf /tmp/hrm-release.tar.gz -C deploy/poc \
+            compose.yml Caddyfile deploy.sh configure.py backup.sh release.json
+          DATA_BUCKET=$(python3 -c 'import json; print(json.load(open("deploy/poc/release.json"))["bucket"])')
+          aws s3 cp /tmp/hrm-release.tar.gz "s3://$DATA_BUCKET/releases/$GITHUB_SHA.tar.gz" --only-show-errors
+      - name: Deploy through Systems Manager
+        run: |
+          cd "$APP_DIR"
+          python3 deploy/poc/send_deploy.py
+      - name: Verify public HTTPS endpoint
+        run: |
+          curl --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 10 \
+            "https://$TF_VAR_domain_name/healthz"
+          echo "Deployed https://$TF_VAR_domain_name" >> "$GITHUB_STEP_SUMMARY"

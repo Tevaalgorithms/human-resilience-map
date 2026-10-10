@@ -1,0 +1,92 @@
+name: hrm-lightsail
+x-app: &app
+  image: ${APP_IMAGE:?Use an immutable app image tag or digest}
+  restart: unless-stopped
+  env_file: [{path: runtime.env, format: raw}]
+  environment: &env
+    HRM_DB_HOST: db
+    HRM_DB_NAME: resilience
+    HRM_DB_USER: resilience
+    HRM_API_BASE_URL: http://api:8000
+    HRM_QUEUE_BACKEND: local
+    HRM_OBJECT_STORE_BACKEND: local
+    HRM_OBJECT_STORE_PATH: /data/objects
+    HRM_PREPARATION_PATH: /data/preparation
+    HRM_IMPORT_PATH: /data/imports
+    HRM_ENABLE_PREPARATION: "false"
+    WEB_CONCURRENCY: "1"
+    HRM_MAX_MAP_FEATURES: "500"
+    HRM_MAX_CANDIDATE_SITES: "50"
+    HRM_SOLVER_MAX_SECONDS: "15"
+    HRM_SOLVER_TOTAL_SECONDS_PER_JOB: "60"
+    HRM_MAX_ANALYSIS_RUNS_PER_JOB: "10"
+    HRM_MAX_COMPARISON_SCENARIOS: "5"
+    HRM_MAX_SENSITIVITY_RUNS: "5"
+    HRM_MAX_TOOL_CALLS_PER_JOB: "24"
+    HRM_MAX_RESULT_BYTES: "1000000"
+  volumes: ["objects:/data/objects", "preparation:/data/preparation", "uploads:/data/imports", "../../data:/imports:ro"]
+  logging: &logging
+    driver: json-file
+    options: {max-size: "10m", max-file: "3"}
+  depends_on:
+    db: {condition: service_healthy}
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    restart: unless-stopped
+    env_file: [{path: database.env, format: raw}]
+    environment: {POSTGRES_DB: resilience, POSTGRES_USER: resilience}
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+    mem_limit: 768m
+    command: [postgres, -c, shared_buffers=128MB, -c, max_connections=40, -c, work_mem=4MB]
+    logging: *logging
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U resilience -d resilience"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+  migrate:
+    <<: *app
+    restart: "no"
+    command: [migrate]
+    profiles: [tools]
+    mem_limit: 256m
+  ingest:
+    <<: *app
+    restart: "no"
+    command: [ingest, --source, files]
+    profiles: [tools]
+    mem_limit: 768m
+  api:
+    <<: *app
+    command: [api]
+    mem_limit: 512m
+  frontend:
+    <<: *app
+    command: [frontend]
+    mem_limit: 512m
+  dispatcher:
+    <<: *app
+    command: [dispatcher]
+    mem_limit: 192m
+  worker:
+    <<: *app
+    command: [worker]
+    mem_limit: 1g
+    stop_grace_period: 120s
+  caddy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    environment: {APP_DOMAIN: "${APP_DOMAIN:?Set your DNS name}"}
+    volumes: ["./Caddyfile:/etc/caddy/Caddyfile:ro", "caddy_data:/data", "caddy_config:/config"]
+    mem_limit: 128m
+    logging: *logging
+    depends_on: [frontend]
+volumes:
+  pgdata:
+  objects:
+  preparation:
+  uploads:
+  caddy_data:
+  caddy_config:

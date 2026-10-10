@@ -1,0 +1,131 @@
+@startuml HumanResilienceMapArchitecture
+title Human Resilience Map — alternative enterprise ECS/RDS architecture
+' Initial target is now 4 GB Lightsail / Compose; see docs/lightsail.md.
+left to right direction
+skinparam componentStyle rectangle
+skinparam shadowing false
+skinparam linetype ortho
+skinparam packageStyle rectangle
+skinparam defaultFontName Arial
+
+actor "Community planner" as User
+cloud "Public data sources\nCensus / ACS, NOAA,\ncanopy, local facilities, routing" as Sources
+
+rectangle "AWS Cloud — planned deployment" as AWS {
+  component "Route 53\nDomain resolution" as DNS
+  component "Cognito\nSign-in / identity" as Auth
+  component "Amazon Bedrock\nRequest planning + grounded explanation" as Model
+  component "EventBridge Scheduler" as Scheduler
+  queue "SQS analysis queue\nRetry + visibility timeout" as Queue
+  queue "Dead-letter queue" as DLQ
+  storage "Private S3\nRaw snapshots, rasters, exports" as S3
+
+  package "VPC" {
+    package "Public subnets" {
+      component "Application Load Balancer\nHTTPS / ACM certificate" as ALB
+      component "NAT gateway\nControlled outbound access" as NAT
+    }
+
+    package "Private application subnets — ECS Fargate" {
+      component "Python Dash / Plotly frontend\nMap, indicators, question panel,\nscenario comparison, progress polling" as UI
+      component "Python FastAPI backend\nAuthorization, validation,\nmap queries, jobs, results" as API
+      component "Separate NWS monitoring\nObservations / alerts / forecasts\nBounded cache and freshness flags" as Weather
+      component "Outbox dispatcher\nReliable queue submission" as Dispatcher
+      component "Python ingestion task\nNormalize / validate / publish\nversioned datasets" as Ingestion
+
+      package "Python analysis worker" {
+        component "SQS consumer\nAtomic claim / idempotency / recovery" as Consumer
+        component "LangGraph orchestrator\nTyped plan / clarification / checkpoints" as Graph
+        component "Data tools\nDemographic + environment retrieval" as DataTools
+        component "Deterministic GIS tools\nPostGIS / GeoPandas / raster / access" as GIS
+        component "Deterministic risk engine\nVersioned 0-100 resilience index\nFactor contributions + sensitivity" as Risk
+        component "Deterministic optimizer\nOR-Tools: site selection\nBudget / capacity / travel constraints" as Solver
+        component "Verification layer\nData + calculation + feasibility checks\nNarrative evidence consistency" as Verify
+        component "Result publisher\nVerified output or explicit\nincomplete / infeasible status" as Publish
+      }
+    }
+
+    package "Private database subnets" {
+      database "RDS PostgreSQL + PostGIS\nSpatial inputs / dataset versions\nJobs / outbox / results\nLangGraph checkpoints / sessions" as DB
+    }
+  }
+
+  component "Secrets Manager + IAM task roles\nCredentials / least-privilege access" as Security
+  component "CloudWatch\nLogs, job metrics, alarms" as Monitor
+  component "ECR + Terraform\nContainer images / infrastructure" as Deploy
+}
+
+User --> DNS : Open application
+DNS --> ALB : Resolve domain
+ALB --> UI : HTTPS entry
+User --> Auth : Sign in
+UI --> Auth : Login flow
+UI --> API : Submit question / constraints\nPoll job / retrieve map / export
+API --> Auth : Validate identity\n(cached keys)
+API --> Weather : Current point context only
+Weather --> Sources : NWS verified API; not historical scoring
+API --> DB : Read baseline / authorize access\nTransaction: job + outbox
+Dispatcher --> DB : Read pending outbox
+Dispatcher --> Queue : Publish job ID
+Queue --> Consumer : Deliver analysis job
+Queue --> DLQ : Exhausted retries
+Consumer --> DB : Claim job / pinned versions
+Consumer --> Graph : Run or resume workflow
+Graph --> Model : Interpret request\nExplain checked outputs
+Graph --> DataTools : Retrieve required evidence
+DataTools --> DB : Versioned indicators / resources
+Graph --> GIS : Execute typed spatial tools
+GIS --> DB : Spatial queries
+GIS --> S3 : Raster / artifact reads
+GIS --> Risk : Exposure + access indicators
+Risk --> Solver : Vulnerability / weighted demand
+Solver --> Verify : Baseline / scenario coverage\nConstraints / solver evidence
+Graph --> Verify : Explanation claims / citations
+Verify --> Publish : Checked payload / failure details
+Publish --> DB : Result + provenance + status
+Publish --> S3 : Export artifacts
+Graph --> DB : Durable checkpoints
+API --> S3 : Authorized short-lived download links
+
+Scheduler --> Ingestion : Scheduled ECS task
+Ingestion --> NAT : Acquire public datasets
+NAT --> Sources : Outbound requests
+Ingestion --> S3 : Preserve raw snapshots / derived rasters
+Ingestion --> DB : Publish validated dataset version
+
+Security ..> API : Runtime access
+Security ..> Consumer : Runtime access
+Security ..> Ingestion : Runtime access
+Monitor ..> API : Observe
+Monitor ..> Consumer : Observe
+Monitor ..> Ingestion : Observe
+Deploy ..> UI : Deploy image
+Deploy ..> API : Deploy image
+Deploy ..> Consumer : Deploy image
+
+note bottom of UI
+  Response: map + comparison table + explanation + sources.
+  Illustrative UI is not a live emergency warning service.
+end note
+
+note bottom of Graph
+  Missing essential inputs -> needs_input -> user clarification.
+  LLM nodes interpret and explain; deterministic tools calculate.
+  A node need not be a separate LLM agent.
+end note
+
+note bottom of Verify
+  Check units, geometry, missing data, score bounds,
+  overlapping populations, feasibility and solver status.
+  Fallback to a deterministic summary if narrative checks fail.
+  Local human review precedes operational allocation.
+end note
+
+legend bottom
+  Solid arrows: request, data, or workflow direction.
+  Dotted arrows: deployment, permissions, or monitoring dependency.
+  AWS service traffic uses NAT or selected VPC endpoints;
+  connectivity is summarized rather than drawing every network hop.
+  Design proposal; no deployment implied. Created October 6, 2026.
+endlegend
+@enduml

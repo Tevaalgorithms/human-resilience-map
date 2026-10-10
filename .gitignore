@@ -1,0 +1,57 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+.data/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+dist/
+build/
+*.egg-info/
+.DS_Store
+coverage.xml
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+*.auto.tfvars
+.terraform.lock.hcl.bak
+data/
+
+# POC runtime secrets and generated release metadata
+deploy/poc/runtime.json
+deploy/poc/deployment.env
+deploy/poc/release.json
+
+# Lightsail host secrets
+/deploy/lightsail/runtime.env
+/deploy/lightsail/database.env
+/deploy/lightsail/.env
+
+.coverage
+
+# Local secret variants and Terraform runtime state (never source artifacts).
+.env.*
+!.env.example
+!.env.production.example
+*.pem
+*.key
+*.p12
+*.pfx
+terraform.tfvars
+terraform.tfvars.json
+*.auto.tfvars.json
+*.tfstate*
+*.tfplan
+.terraform/
+
+# Docs: only architecture decisions and architecture diagrams are published.
+docs/*
+!docs/ADR-*.md
+!docs/architecture.md
+!docs/architecture.puml
+!docs/deployment.md

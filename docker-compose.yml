@@ -1,0 +1,93 @@
+# Local development stack. `docker compose up db` for just the database,
+# `docker compose --profile app up --build` for the full stack.
+name: resilience-map
+
+x-app-env: &app-env
+  HRM_ENVIRONMENT: local
+  # Non-secret selectors only. AWS runtime identity is supplied separately when SSM is enabled.
+  HRM_SECRET_SOURCE: ${HRM_SECRET_SOURCE:-environment}
+  HRM_SSM_PARAMETER_PREFIX: ${HRM_SSM_PARAMETER_PREFIX:-/human-resilience-map/local}
+  HRM_SSM_REGION: ${HRM_SSM_REGION:-us-west-2}
+  HRM_DB_HOST: db
+  HRM_DB_NAME: resilience
+  HRM_DB_USER: resilience
+  HRM_DB_PASSWORD: ${HRM_DB_PASSWORD:?Set HRM_DB_PASSWORD in your private .env}
+  HRM_SESSION_SECRET: ${HRM_SESSION_SECRET:?Set HRM_SESSION_SECRET in your private .env}
+  HRM_API_BASE_URL: http://api:8000
+  HRM_OBJECT_STORE_PATH: /data/objects
+  HRM_LLM_PROVIDER: ${HRM_LLM_PROVIDER:-openai}
+  HRM_OPENAI_MODEL: ${HRM_OPENAI_MODEL:-gpt-5.4-mini}
+  HRM_OPENAI_REASONING_EFFORT: ${HRM_OPENAI_REASONING_EFFORT:-none}
+  HRM_ENABLE_PREPARATION: ${HRM_ENABLE_PREPARATION:-false}
+  HRM_PREPARATION_PATH: /data/preparation
+  HRM_IMPORT_PATH: /data/imports
+  HRM_BEDROCK_MODEL_ID: ${HRM_BEDROCK_MODEL_ID:-}
+
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    platform: linux/amd64   # official image is amd64-only; runs under emulation on Apple silicon
+    environment:
+      POSTGRES_DB: resilience
+      POSTGRES_USER: resilience
+      POSTGRES_PASSWORD: ${HRM_DB_PASSWORD:?Set HRM_DB_PASSWORD in your private .env}
+    ports: ["5432:5432"]
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U resilience -d resilience"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  migrate:
+    profiles: [app]
+    build: .
+    command: ["migrate"]
+    environment: *app-env
+    depends_on: {db: {condition: service_healthy}}
+    restart: "no"
+
+  api:
+    profiles: [app]
+    build: .
+    command: ["api"]
+    environment:
+      <<: *app-env
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-${HRM_OPENAI_API_KEY:-}}
+      HRM_CENSUS_API_KEY: ${HRM_CENSUS_API_KEY:-${CENSUS_API_KEY:-}}
+    ports: ["8000:8000"]
+    volumes: ["preparation:/data/preparation", "imports:/data/imports", "objects:/data/objects"]
+    depends_on: {migrate: {condition: service_completed_successfully}}
+
+  frontend:
+    profiles: [app]
+    build: .
+    command: ["frontend"]
+    environment:
+      <<: *app-env
+      HRM_COGNITO_CLIENT_SECRET: ${HRM_COGNITO_CLIENT_SECRET:-}
+    ports: ["8050:8050"]
+    depends_on: [api]
+
+  dispatcher:
+    profiles: [app]
+    build: .
+    command: ["dispatcher"]
+    environment: *app-env
+    depends_on: {migrate: {condition: service_completed_successfully}}
+
+  worker:
+    profiles: [app]
+    build: .
+    command: ["worker"]
+    environment:
+      <<: *app-env
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-${HRM_OPENAI_API_KEY:-}}
+    volumes: ["objects:/data/objects"]
+    depends_on: {migrate: {condition: service_completed_successfully}}
+
+volumes:
+  pgdata:
+  objects:
+  preparation:
+  imports:

@@ -1,13 +1,8 @@
 # Human Resilience Map — Extreme-Heat Planning Platform
 
-> A planning application for exploring extreme-heat vulnerability and cooling-center access, built with Python, PostGIS, LangGraph and AWS.
-> Designed to **teach grounded, verifiable AI workflows** through a real-world public-health planning domain.
-
 This is a planning pilot. Scores are historical planning indices, not medical predictions.
 Recommendations depend on reviewed facility inventories, candidate suitability, capacities,
 costs and travel assumptions. Missing inputs stay visible rather than being invented.
-
-**Live demo:** [resilience.tevaalgorithms.com](https://resilience.tevaalgorithms.com) (invite-only sign-in)
 
 ---
 
@@ -61,6 +56,8 @@ sources are hard to audit.
 > **Scope:** this tool supports planning decisions; it does not predict individual health
 > outcomes or prevent harm on its own. Its value depends on reviewed local inventories and on
 > planners acting on the results.
+
+**Live demo:** [resilience.tevaalgorithms.com](https://resilience.tevaalgorithms.com) (invite-only sign-in)
 
 ---
 
@@ -385,32 +382,25 @@ uv run hrm ingest --source files
 
 ---
 
-## Deploying to AWS (Oregon, `us-west-2`)
+## Deployment options
 
-The low-cost POC in `infrastructure/poc` creates a t4g.medium (30 GB encrypted disk), Elastic IP,
-private S3 bucket, ECR repositories, Cognito login, Route 53 record for
-**https://resilience.tevaalgorithms.com**, IAM roles and budget alerts. There is no NAT gateway, ALB,
-RDS or ECS; PostgreSQL/PostGIS runs on the host. Terraform is pinned to AWS account `702018061088`
-and refuses to run against any other account.
+The repository supports three AWS deployment paths. Only the first is running today; the
+section after this table lists its resources.
 
-```bash
-# One-time bootstrap (local credentials for the target account)
-terraform -chdir=infrastructure/poc/bootstrap init
-terraform -chdir=infrastructure/poc/bootstrap apply \
-  -var='github_repository=Tevaalgorithms/human-resilience-map' \
-  -var='hosted_zone_id=<ROUTE53_ZONE_ID>'
-```
+| Path | Where in the repo | Estimated cost | Status |
+| --- | --- | --- | --- |
+| One Lightsail host with Docker Compose | `deploy/lightsail` | about $24 a month | **Live** |
+| EC2 with Terraform (low-cost POC, CI deploy over OIDC) | `infrastructure/poc` | $40 to $50 a month | Available, not deployed |
+| ECS, RDS and a load balancer (Terraform) | `infrastructure/terraform` | $210 to $310 a month for a pilot, more for production | Available, not deployed |
 
-Then set the `POC_*` repository variables and merge to `main`; GitHub Actions validates, builds
-native ARM images, applies Terraform and deploys over OIDC — no long-lived AWS keys.
-See [deployment](docs/deployment.md) for the full runbook.
+Costs are planning estimates, not quotes. See [deployment](docs/deployment.md) for the runbooks.
 
 ---
 
 ## Live AWS Deployment (Lightsail, `us-west-2`)
 
 The currently running pilot is served at **https://resilience.tevaalgorithms.com** from a single
-Lightsail host using Docker Compose ([lightsail](docs/lightsail.md)). It was created with the AWS
+Lightsail host using Docker Compose (see `deploy/lightsail`). It was created with the AWS
 CLI, **not** the Terraform POC above, so none of the EC2, ECR, S3 or OIDC resources from that path
 exist. Estimated cost is about **$24/month** plus optional OpenAI usage.
 

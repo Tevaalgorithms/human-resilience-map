@@ -51,3 +51,24 @@ def test_login_redirects_to_cognito():
     r = _client().get("/login")
     assert r.status_code == 302
     assert r.headers["Location"].startswith("https://login.example.test/oauth2/authorize")
+
+
+def test_stale_callback_restarts_sign_in_once_then_explains():
+    client = _client()
+    stale = "/callback?code=old-code&state=old-state"
+    first = client.get(stale)
+    assert first.status_code == 302 and first.headers["Location"].endswith("/login")
+    assert "hrm_retry=1" in first.headers.get("Set-Cookie", "")
+    second = client.get(stale)  # the retry cookie is now set: no redirect loop
+    assert second.status_code == 400
+    assert "sign-in link has expired" in second.get_data(as_text=True)
+
+
+def test_callback_when_already_signed_in_goes_home(monkeypatch):
+    from resilience_map.frontend import auth
+
+    monkeypatch.setattr(auth, "_load_session", lambda sid: {"access_token": "t"})
+    client = _client()
+    client.set_cookie("hrm_sid", "existing", domain="localhost")
+    r = client.get("/callback?code=old-code&state=old-state")
+    assert r.status_code == 302 and r.headers["Location"].endswith("/")

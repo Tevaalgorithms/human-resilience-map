@@ -15,6 +15,7 @@ from typing import Any
 import dash
 from dash import ALL, ClientsideFunction, Input, Output, State, ctx, dcc, html, no_update
 from flask import abort
+from werkzeug.exceptions import Unauthorized
 
 from resilience_map import __version__
 from resilience_map.core.config import get_settings
@@ -89,6 +90,11 @@ def create_dash_app() -> dash.Dash:
     def serve_layout() -> html.Div:
         try:
             areas = api.get("/v1/study-areas", auth())
+        except Unauthorized:
+            # Dash validates the layout once, on the first request that reaches it, with no
+            # signed-in user. Real page loads are already gated by the login check, so an empty
+            # placeholder is returned here instead of failing that request with a 401.
+            return html.Div()
         except ApiError as e:
             return html.Div(
                 [html.Div(views.error_box(e.detail), className="card-b")], style={"padding": "24px"}

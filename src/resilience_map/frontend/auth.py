@@ -21,6 +21,7 @@ from resilience_map.core.config import Settings
 from resilience_map.core.db import session_scope
 
 COOKIE = "hrm_sid"
+RETRY_COOKIE = "hrm_retry"
 PUBLIC_PATHS = ("/login", "/callback", "/logout", "/healthz", "/assets/", "/_favicon.ico")
 
 _LANDING_HTML = """<!doctype html>
@@ -150,10 +151,26 @@ def install_auth(server: Flask, settings: Settings) -> None:
 
     @server.get("/callback")
     def callback() -> Response:
+        if _load_session(request.cookies.get(COOKIE)):
+            return redirect("/")  # already signed in, e.g. a second tab or a replayed link
         if not request.args.get("code") or request.args.get("state") != request.cookies.get(
             "hrm_state"
         ):
-            abort(400, "Invalid login response")
+            # A stale sign-in: an old tab, a state older than 10 minutes, or a replayed link.
+            # Start one fresh sign-in; if that also fails, say so plainly instead of looping.
+            if request.cookies.get(RETRY_COOKIE):
+                failed = make_response(
+                    "Your sign-in link has expired. Close any old sign-in tabs, open the home "
+                    "page and sign in again.",
+                    400,
+                )
+                failed.delete_cookie(RETRY_COOKIE)
+                return failed
+            retry = redirect("/login")
+            retry.set_cookie(
+                RETRY_COOKIE, "1", max_age=120, httponly=True, secure=secure, samesite="Lax"
+            )
+            return retry
         creds = base64.b64encode(
             f"{settings.cognito_client_id}:{settings.cognito_client_secret}".encode()
         ).decode()
@@ -175,6 +192,7 @@ def install_auth(server: Flask, settings: Settings) -> None:
         sid = _create_session({"access_token": tok["access_token"]}, ttl)
         resp = redirect("/")
         resp.delete_cookie("hrm_state")
+        resp.delete_cookie(RETRY_COOKIE)
         resp.set_cookie(COOKIE, sid, max_age=ttl, httponly=True, secure=secure, samesite="Lax")
         return resp
 

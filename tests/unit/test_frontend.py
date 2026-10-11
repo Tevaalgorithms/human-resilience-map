@@ -569,3 +569,17 @@ def test_selection_summary_explains_ok_and_oversized_selection(app):
         [("map-data", "data", small), ("planning-bbox", "value", "not-a-box")],
     )
     assert "alert error" in json.dumps(bad)
+
+
+def test_layout_renders_a_placeholder_when_there_is_no_session(app, monkeypatch):
+    """Dash's one-time startup validation calls the layout without a signed-in user."""
+    from werkzeug.exceptions import Unauthorized
+
+    from resilience_map.frontend import app as app_mod
+
+    def no_session(_settings):
+        raise Unauthorized()
+
+    monkeypatch.setattr(app_mod, "api_auth_headers", no_session)
+    layout = app_mod.create_dash_app().layout()
+    assert layout is not None and not getattr(layout, "children", None)

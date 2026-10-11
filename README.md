@@ -7,6 +7,61 @@ This is a planning pilot. Scores are historical planning indices, not medical pr
 Recommendations depend on reviewed facility inventories, candidate suitability, capacities,
 costs and travel assumptions. Missing inputs stay visible rather than being invented.
 
+**Live demo:** [resilience.tevaalgorithms.com](https://resilience.tevaalgorithms.com) (invite-only sign-in)
+
+---
+
+## What is this?
+
+Human Resilience Map is a web application that helps public-health and emergency planners answer
+three questions about extreme heat:
+
+1. **Who is most vulnerable?** Every US census tract gets a transparent 0 to 100 resilience score
+   built from land-surface heat, tree canopy, age, income and other indicators.
+2. **What do we not know?** Missing data stays visible instead of being filled in with guesses.
+3. **Where would new cooling centers help most?** Planners can test siting scenarios under
+   capacity, budget and travel-time constraints, once a reviewed facility inventory is loaded.
+
+It combines public datasets (Census ACS, Landsat surface temperature, NLCD tree canopy) with
+deterministic GIS and optimization. LangGraph agents use a language model only to **interpret a
+question and explain verified results**; they never calculate a number. Two areas are loaded today:
+Travis County, TX and California statewide (9,129 census tracts).
+
+## Why it matters
+
+Extreme heat is a growing health risk, and it falls hardest on older adults, young children,
+low-income communities and outdoor workers.
+
+| Fact | Source |
+| --- | --- |
+| About 489,000 heat-related deaths occur each year worldwide (studies of 2000 to 2019) | [WHO, Climate change: heat and health](https://www.who.int/news-room/fact-sheets/detail/climate-change-heat-and-health) |
+| Heat-related mortality among people over 65 rose by about 85% between 2000 to 2004 and 2017 to 2021 | [WHO](https://www.who.int/news-room/fact-sheets/detail/climate-change-heat-and-health) |
+| In the US, heat-related deaths averaged 702 a year from 2004 to 2018 (415 as the underlying cause, 287 as a contributing cause) | [CDC MMWR, Heat-related deaths, 2004 to 2018](https://www.cdc.gov/mmwr/volumes/69/wr/mm6924a1.htm) |
+| US deaths from excessive natural heat ranged from 297 (2004) to 1,153 (2020) | [CDC MMWR QuickStats, 1999 to 2020](https://www.cdc.gov/mmwr/volumes/71/wr/mm7134a5.htm) |
+| Urban areas run about 1 to 7°F hotter by day and 2 to 5°F hotter at night than outlying areas | [US EPA, Learn about heat islands](https://www.epa.gov/heatislands/learn-about-heat-islands) |
+| Older adults, young children, low-income populations and outdoor workers are the groups of greatest concern | [US EPA](https://www.epa.gov/heatislands/learn-about-heat-islands), [WHO](https://www.who.int/news-room/fact-sheets/detail/climate-change-heat-and-health) |
+
+Heat risk is not spread evenly across a city: pavement, tree cover, age and income can all
+change it from one census tract to the next. Cities have limited cooling resources, so
+**where** they place them decides who is protected. Today that decision usually means stitching
+together census tables, satellite imagery and facility lists by hand, and AI summaries of those
+sources are hard to audit.
+
+## How it helps
+
+- **Target:** a tract-level map shows where heat, low canopy and vulnerable residents overlap, so
+  limited resources go where they matter most.
+- **Decide:** scenario comparison and sensitivity runs show how a siting choice changes who is
+  covered, and what assumptions it depends on.
+- **Trust:** every answer carries the dataset version, prompt version and verification result;
+  claims are checked against tool output, and unsupported text is replaced.
+- **Reuse:** new regions load as versioned source packages. Heat is the first hazard, and the
+  same grounded-AI pattern is designed to extend to others, such as flood.
+
+> **Scope:** this tool supports planning decisions; it does not predict individual health
+> outcomes or prevent harm on its own. Its value depends on reviewed local inventories and on
+> planners acting on the results.
+
 ---
 
 ## Architecture Overview

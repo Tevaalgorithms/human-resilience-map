@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# One-time setup for the Deploy to Lightsail workflow. Run it yourself: it changes IAM.
+#   AWS_PROFILE=<admin> ./scripts/setup-github-deploy.sh
+# It creates (if missing) the GitHub OIDC provider and a role that can only edit the firewall of
+# Lightsail instances in us-west-2. No long-lived AWS keys are stored in GitHub.
+set -euo pipefail
+REPO="Tevaalgorithms/human-resilience-map"
+ROLE="hrm-github-deploy"
+REGION="us-west-2"
+ACCOUNT="$(aws sts get-caller-identity --query Account --output text)"
+OIDC="arn:aws:iam::${ACCOUNT}:oidc-provider/token.actions.githubusercontent.com"
+
+aws iam get-open-id-connect-provider --open-id-connect-provider-arn "$OIDC" >/dev/null 2>&1 ||
+  aws iam create-open-id-connect-provider --url https://token.actions.githubusercontent.com \
+    --client-id-list sts.amazonaws.com --thumbprint-list 6938fd4d98bab03faadb97b34396831e3780aea1 >/dev/null
+
+TRUST="$(cat <<JSON
+{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Federated":"$OIDC"},
+ "Action":"sts:AssumeRoleWithWebIdentity",
+ "Condition":{"StringEquals":{"token.actions.githubusercontent.com:aud":"sts.amazonaws.com",
+ "token.actions.githubusercontent.com:sub":"repo:${REPO}:environment:production"}}}]}
+JSON
+)"
+POLICY="$(cat <<JSON
+{"Version":"2012-10-17","Statement":[{"Effect":"Allow",
+ "Action":["lightsail:PutInstancePublicPorts","lightsail:GetInstancePortStates","lightsail:GetInstance"],
+ "Resource":"arn:aws:lightsail:${REGION}:${ACCOUNT}:Instance/*"}]}
+JSON
+)"
+aws iam create-role --role-name "$ROLE" --assume-role-policy-document "$TRUST" >/dev/null 2>&1 ||
+  aws iam update-assume-role-policy --role-name "$ROLE" --policy-document "$TRUST"
+aws iam put-role-policy --role-name "$ROLE" --policy-name lightsail-firewall --policy-document "$POLICY"
+
+cat <<MSG
+
+Role ready: arn:aws:iam::${ACCOUNT}:role/${ROLE}
+
+Add these in GitHub (Settings > Secrets and variables > Actions), then create an environment named
+"production" (Settings > Environments) and add yourself as a required reviewer:
+  Variable DEPLOY_ROLE_ARN   = arn:aws:iam::${ACCOUNT}:role/${ROLE}
+  Variable LIGHTSAIL_HOST    = <static IP of hrm-prod>
+  Variable ADMIN_CIDR        = <your admin IP>/32   (currently the host's SSH rule)
+  Secret   LIGHTSAIL_SSH_KEY = contents of a deploy-only private key (see docs/deployment.md)
+  Secret   LIGHTSAIL_KNOWN_HOSTS = output of: ssh-keyscan -t ed25519 <static IP>
+MSG

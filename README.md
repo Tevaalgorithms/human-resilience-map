@@ -447,6 +447,18 @@ aws ssm delete-parameters --region us-west-2 --names \
 
 ---
 
+### CI/CD pipeline
+
+| Stage | Workflow | Trigger | What it does |
+| --- | --- | --- | --- |
+| Check | `ci.yml` | Every pull request and push to `main` | ruff, mypy, unit and integration tests (PostGIS service), Terraform fmt and validate |
+| Deploy | `deploy-lightsail.yml` | After `ci` passes on `main`, or manually | Waits for approval on the `production` environment, opens SSH to the runner only, syncs source, builds the image on the host, migrates, restarts, health-checks `/healthz`, rolls back on failure, and closes SSH again |
+
+The pipeline uses GitHub OIDC, so no long-lived AWS keys are stored in GitHub. Secrets and data stay
+on the host and are never overwritten. One-time setup: run `scripts/setup-github-deploy.sh`, add the
+variables it prints, and create the `production` environment with a required reviewer.
+`deploy-poc.yml` is the separate Graviton POC and runs only on pull requests or manually.
+
 ## Checks and Cleanup
 
 ```bash

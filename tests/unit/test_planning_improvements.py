@@ -279,8 +279,13 @@ def test_inventory_unknown_capacity_metadata_and_hash():
         validate_inventory(
             bundle.model_copy(update={"centers": [], "inventory_status": "confirmed_absent"})
         )
+
+
+@pytest.mark.skipif(not Path("data/travis").is_dir(), reason="data/ is not stored in Git")
+def test_real_travis_snapshot_has_unknown_inventory():
+    names = set(SyntheticAdapter().fetch().files)
     travis, _ = parse_snapshot(
-        {p.name: p.read_bytes() for p in Path("data/travis").iterdir() if p.name in files}
+        {p.name: p.read_bytes() for p in Path("data/travis").iterdir() if p.name in names}
     )
     assert travis.inventory_status == "unknown" and not travis.centers
 

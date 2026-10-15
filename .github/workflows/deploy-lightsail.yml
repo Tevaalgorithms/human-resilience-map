@@ -36,9 +36,9 @@ jobs:
     steps:
       - id: check
         env:
-          ROLE: ${{ vars.DEPLOY_ROLE_ARN }}
-          HOST: ${{ vars.LIGHTSAIL_HOST }}
-          ADMIN: ${{ vars.ADMIN_CIDR }}
+          ROLE: ${{ secrets.DEPLOY_ROLE_ARN }}
+          HOST: ${{ secrets.LIGHTSAIL_HOST }}
+          ADMIN: ${{ secrets.ADMIN_CIDR }}
           KEY: ${{ secrets.LIGHTSAIL_SSH_KEY }}
           KNOWN: ${{ secrets.LIGHTSAIL_KNOWN_HOSTS }}
         run: |
@@ -65,7 +65,7 @@ jobs:
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ vars.DEPLOY_ROLE_ARN }}
+          role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Open SSH to this runner only
@@ -76,11 +76,11 @@ jobs:
           aws lightsail put-instance-public-ports --instance-name "$INSTANCE_NAME" --port-infos \
             "fromPort=80,toPort=80,protocol=tcp,cidrs=0.0.0.0/0,ipv6Cidrs=::/0" \
             "fromPort=443,toPort=443,protocol=tcp,cidrs=0.0.0.0/0,ipv6Cidrs=::/0" \
-            "fromPort=22,toPort=22,protocol=tcp,cidrs=${{ vars.ADMIN_CIDR }},${RUNNER_IP}/32"
+            "fromPort=22,toPort=22,protocol=tcp,cidrs=${{ secrets.ADMIN_CIDR }},${RUNNER_IP}/32"
 
       - name: Sync source and deploy
         env:
-          HOST: ${{ vars.LIGHTSAIL_HOST }}
+          HOST: ${{ secrets.LIGHTSAIL_HOST }}
           SSH_KEY: ${{ secrets.LIGHTSAIL_SSH_KEY }}
           KNOWN_HOSTS: ${{ secrets.LIGHTSAIL_KNOWN_HOSTS }}
           SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
@@ -109,4 +109,4 @@ jobs:
           aws lightsail put-instance-public-ports --instance-name "$INSTANCE_NAME" --port-infos \
             "fromPort=80,toPort=80,protocol=tcp,cidrs=0.0.0.0/0,ipv6Cidrs=::/0" \
             "fromPort=443,toPort=443,protocol=tcp,cidrs=0.0.0.0/0,ipv6Cidrs=::/0" \
-            "fromPort=22,toPort=22,protocol=tcp,cidrs=${{ vars.ADMIN_CIDR }}"
+            "fromPort=22,toPort=22,protocol=tcp,cidrs=${{ secrets.ADMIN_CIDR }}"

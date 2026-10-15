@@ -456,7 +456,7 @@ aws ssm delete-parameters --region us-west-2 --names \
 
 The pipeline uses GitHub OIDC, so no long-lived AWS keys are stored in GitHub. Secrets and data stay
 on the host and are never overwritten. One-time setup: run `scripts/setup-github-deploy.sh`, add the
-variables it prints, and create the `production` environment with a required reviewer.
+secrets it prints, and create the `production` environment with a required reviewer.
 `deploy-poc.yml` is the separate Graviton POC and runs only on pull requests or manually.
 
 ## Checks and Cleanup

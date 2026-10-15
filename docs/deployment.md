@@ -69,7 +69,7 @@ one runtime secret, CloudWatch agent/log group, Route 53 subdomain record, IAM r
 budget notifications. There is no NAT gateway, ALB, RDS, ECS or paid LangGraph hosting.
 The database, queue, checkpoint store and sessions share PostgreSQL/PostGIS on the host.
 
-The default is `https://resilience.tevaalgorithms.com`, us-west-2 (Oregon), AWS account 702018061088, and a $50 monthly budget.
+The default is `https://resilience.tevaalgorithms.com`, us-west-2 (Oregon), your AWS account (set `aws_account_id`), and a $50 monthly budget.
 Planning cost: EC2 $24.53, EBS $2.40, IPv4 $3.65, plus small S3/ECR, monitoring, secrets and
 DNS usage. Allow $40–$50/month before model calls, taxes, significant transfer or increased
 backup retention. ECR and Terraform state add small storage costs. Standard CPU-credit mode

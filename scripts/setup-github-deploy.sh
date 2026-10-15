@@ -35,11 +35,11 @@ cat <<MSG
 
 Role ready: arn:aws:iam::${ACCOUNT}:role/${ROLE}
 
-Add these in GitHub (Settings > Secrets and variables > Actions), then create an environment named
+Add these as repository SECRETS, not variables (this repo is public; secrets stay masked in logs). Also create an environment named
 "production" (Settings > Environments) and add yourself as a required reviewer:
-  Variable DEPLOY_ROLE_ARN   = arn:aws:iam::${ACCOUNT}:role/${ROLE}
-  Variable LIGHTSAIL_HOST    = <static IP of hrm-prod>
-  Variable ADMIN_CIDR        = <your admin IP>/32   (currently the host's SSH rule)
+  Secret   DEPLOY_ROLE_ARN   = arn:aws:iam::${ACCOUNT}:role/${ROLE}
+  Secret   LIGHTSAIL_HOST    = <static IP of hrm-prod>
+  Secret   ADMIN_CIDR        = <your admin IP>/32   (currently the host's SSH rule)
   Secret   LIGHTSAIL_SSH_KEY = contents of a deploy-only private key (see docs/deployment.md)
   Secret   LIGHTSAIL_KNOWN_HOSTS = output of: ssh-keyscan -t ed25519 <static IP>
 MSG

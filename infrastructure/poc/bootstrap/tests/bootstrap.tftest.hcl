@@ -4,6 +4,7 @@ override_data {
   values = { account_id = "123456789012" }
 }
 variables {
+  aws_account_id             = "123456789012"
   github_repository          = "example/resilience-map"
   hosted_zone_id             = "Z0123456789"
   existing_oidc_provider_arn = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"

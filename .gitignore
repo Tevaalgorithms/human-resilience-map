@@ -56,3 +56,14 @@ docs/*
 !docs/architecture.puml
 !docs/deployment.md
 !docs/branding/
+
+# Credentials and keys (never commit)
+aws.env
+/aws.env
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+hrm-lightsail*
+!*.pub.example

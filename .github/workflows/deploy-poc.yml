@@ -74,7 +74,7 @@ jobs:
             sleep 2
           done
           test "$(docker inspect -f '{{.State.Health.Status}}' hrm-db)" = healthy
-          docker run --rm --network host -e HRM_DB_PASSWORD=test-only hrm-arm:test migrate-and-seed
+          docker run --rm --network host -e HRM_DB_PASSWORD=test-only hrm-arm:test migrate
           uv sync --frozen --extra dev --extra geo
           HRM_TEST_DATABASE_URL=postgresql+psycopg://resilience:test-only@localhost:5432/resilience_test \
             uv run pytest tests

@@ -25,7 +25,7 @@ jobs:
             echo 'APP_DIR=human-resilience-map' >> "$GITHUB_ENV"
           fi
       - uses: astral-sh/setup-uv@v5
-      - run: cd "$APP_DIR" && uv sync --frozen --extra dev
+      - run: cd "$APP_DIR" && uv sync --frozen --extra dev --extra geo
       - run: cd "$APP_DIR" && uv run ruff check src tests scripts deploy && uv run ruff format --check src tests scripts deploy
       - run: cd "$APP_DIR" && uv run mypy src
       - run: cd "$APP_DIR" && uv run pytest tests --cov=resilience_map

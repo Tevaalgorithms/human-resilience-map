@@ -20,7 +20,7 @@ coverage.xml
 crash.log
 *.auto.tfvars
 .terraform.lock.hcl.bak
-data/
+/data/
 
 # POC runtime secrets and generated release metadata
 deploy/poc/runtime.json

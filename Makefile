@@ -5,7 +5,7 @@ help:            ## show targets
 	@grep -E '^[a-zA-Z_-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-14s %s\n", $$1, $$2}'
 
 install:         ## install dependencies
-	$(UV) sync --extra dev
+	$(UV) sync --extra dev --extra geo
 
 db-up:           ## start local PostGIS
 	docker compose up -d --wait db

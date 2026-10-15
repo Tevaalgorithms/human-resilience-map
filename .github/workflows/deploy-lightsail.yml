@@ -1,0 +1,92 @@
+name: Deploy to Lightsail
+
+# Runs after CI passes on main, or manually. The `production` environment can require an approver
+# (Settings > Environments) so nothing reaches production without a person saying yes.
+on:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-lightsail
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-west-2
+  INSTANCE_NAME: hrm-prod
+
+jobs:
+  deploy:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Require deployment settings
+        env:
+          ROLE: ${{ vars.DEPLOY_ROLE_ARN }}
+          HOST: ${{ vars.LIGHTSAIL_HOST }}
+          ADMIN: ${{ vars.ADMIN_CIDR }}
+          KEY: ${{ secrets.LIGHTSAIL_SSH_KEY }}
+          KNOWN: ${{ secrets.LIGHTSAIL_KNOWN_HOSTS }}
+        run: |
+          for v in ROLE HOST ADMIN KEY KNOWN; do
+            [ -n "${!v}" ] || { echo "::error::Missing deployment setting: $v (see scripts/setup-github-deploy.sh)"; exit 1; }
+          done
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Open SSH to this runner only
+        run: |
+          RUNNER_IP="$(curl -fsS https://checkip.amazonaws.com | tr -d '\n')"
+          echo "RUNNER_IP=$RUNNER_IP" >> "$GITHUB_ENV"
+          aws lightsail put-instance-public-ports --instance-name "$INSTANCE_NAME" --port-infos \
+            "fromPort=80,toPort=80,protocol=tcp,cidrs=0.0.0.0/0,ipv6Cidrs=::/0" \
+            "fromPort=443,toPort=443,protocol=tcp,cidrs=0.0.0.0/0,ipv6Cidrs=::/0" \
+            "fromPort=22,toPort=22,protocol=tcp,cidrs=${{ vars.ADMIN_CIDR }},${RUNNER_IP}/32"
+
+      - name: Sync source and deploy
+        env:
+          HOST: ${{ vars.LIGHTSAIL_HOST }}
+          SSH_KEY: ${{ secrets.LIGHTSAIL_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.LIGHTSAIL_KNOWN_HOSTS }}
+          SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key && chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          SSH="ssh -i $HOME/.ssh/deploy_key -o BatchMode=yes -o StrictHostKeyChecking=yes"
+          # Secrets, data and env files live only on the host; never overwrite or send them.
+          rsync -az -e "$SSH" \
+            --exclude='.git/' --exclude='.venv/' --exclude='.github/' --exclude='*cache/' \
+            --exclude='/data/' --exclude='.env*' --exclude='aws.env' \
+            --exclude='runtime.env' --exclude='database.env' --exclude='*.tfstate*' \
+            ./ "ubuntu@${HOST}:hrm/"
+          $SSH "ubuntu@${HOST}" "bash ~/hrm/deploy/lightsail/deploy.sh '$SHA'"
+
+      - name: Verify public endpoint
+        run: |
+          curl --fail --silent --show-error --retry 6 --retry-all-errors --retry-delay 10 \
+            https://resilience.tevaalgorithms.com/healthz
+          echo "Deployed ${{ github.event.workflow_run.head_sha || github.sha }}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Close SSH again
+        if: always()
+        run: |
+          aws lightsail put-instance-public-ports --instance-name "$INSTANCE_NAME" --port-infos \
+            "fromPort=80,toPort=80,protocol=tcp,cidrs=0.0.0.0/0,ipv6Cidrs=::/0" \
+            "fromPort=443,toPort=443,protocol=tcp,cidrs=0.0.0.0/0,ipv6Cidrs=::/0" \
+            "fromPort=22,toPort=22,protocol=tcp,cidrs=${{ vars.ADMIN_CIDR }}"

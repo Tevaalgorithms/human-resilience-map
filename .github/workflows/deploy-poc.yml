@@ -99,6 +99,7 @@ jobs:
       AWS_REGION: ${{ vars.AWS_REGION || 'us-west-2' }}
       TF_IN_AUTOMATION: 'true'
       TF_VAR_region: ${{ vars.AWS_REGION || 'us-west-2' }}
+      TF_VAR_aws_account_id: ${{ vars.POC_AWS_ACCOUNT_ID }}
       TF_VAR_hosted_zone_id: ${{ vars.POC_HOSTED_ZONE_ID }}
       TF_VAR_alert_email: ${{ vars.POC_ALERT_EMAIL }}
       TF_VAR_domain_name: ${{ vars.POC_DOMAIN_NAME || 'resilience.tevaalgorithms.com' }}
@@ -110,7 +111,7 @@ jobs:
           STATE_BUCKET: ${{ vars.POC_STATE_BUCKET }}
         run: |
           test -n "$DEPLOY_ROLE" && test -n "$STATE_BUCKET"
-          test -n "$TF_VAR_hosted_zone_id" && test -n "$TF_VAR_alert_email"
+          test -n "$TF_VAR_hosted_zone_id" && test -n "$TF_VAR_alert_email" && test -n "$TF_VAR_aws_account_id"
           if [ -f pyproject.toml ]; then
             echo 'APP_DIR=.' >> "$GITHUB_ENV"
           else

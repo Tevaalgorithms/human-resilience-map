@@ -13,6 +13,7 @@ override_data {
   values = { value = "ami-0123456789abcdef0" }
 }
 variables {
+  aws_account_id = "123456789012"
   hosted_zone_id = "Z0123456789"
   alert_email    = "owner@example.com"
 }

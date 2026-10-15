@@ -20,8 +20,11 @@ variable "hosted_zone_id" {
 }
 variable "aws_account_id" {
   type        = string
-  default     = "702018061088"
-  description = "Terraform refuses to run against any other AWS account."
+  description = "Terraform refuses to run against any other AWS account (12 digits)."
+  validation {
+    condition     = can(regex("^[0-9]{12}$", var.aws_account_id))
+    error_message = "Use the 12-digit AWS account ID."
+  }
 }
 variable "name" {
   type    = string

@@ -22,8 +22,39 @@ env:
   INSTANCE_NAME: hrm-prod
 
 jobs:
+  config:
+    # Deployment settings are optional until the one-time setup is done. Without them this run
+    # ends green with a visible notice instead of failing every push to main.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-latest
+    outputs:
+      ready: ${{ steps.check.outputs.ready }}
+    steps:
+      - id: check
+        env:
+          ROLE: ${{ vars.DEPLOY_ROLE_ARN }}
+          HOST: ${{ vars.LIGHTSAIL_HOST }}
+          ADMIN: ${{ vars.ADMIN_CIDR }}
+          KEY: ${{ secrets.LIGHTSAIL_SSH_KEY }}
+          KNOWN: ${{ secrets.LIGHTSAIL_KNOWN_HOSTS }}
+        run: |
+          missing=""
+          for v in ROLE HOST ADMIN KEY KNOWN; do [ -n "${!v}" ] || missing="$missing $v"; done
+          if [ -n "$missing" ]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Deployment skipped. Not configured:${missing}. Run scripts/setup-github-deploy.sh and see README, CI/CD pipeline."
+            echo "Deployment skipped (not configured):${missing}" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
   deploy:
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    needs: config
+    if: needs.config.outputs.ready == 'true'
     runs-on: ubuntu-latest
     environment: production
     timeout-minutes: 30
@@ -32,24 +63,13 @@ jobs:
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
-      - name: Require deployment settings
-        env:
-          ROLE: ${{ vars.DEPLOY_ROLE_ARN }}
-          HOST: ${{ vars.LIGHTSAIL_HOST }}
-          ADMIN: ${{ vars.ADMIN_CIDR }}
-          KEY: ${{ secrets.LIGHTSAIL_SSH_KEY }}
-          KNOWN: ${{ secrets.LIGHTSAIL_KNOWN_HOSTS }}
-        run: |
-          for v in ROLE HOST ADMIN KEY KNOWN; do
-            [ -n "${!v}" ] || { echo "::error::Missing deployment setting: $v (see scripts/setup-github-deploy.sh)"; exit 1; }
-          done
-
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Open SSH to this runner only
+        id: open
         run: |
           RUNNER_IP="$(curl -fsS https://checkip.amazonaws.com | tr -d '\n')"
           echo "RUNNER_IP=$RUNNER_IP" >> "$GITHUB_ENV"
@@ -84,7 +104,7 @@ jobs:
           echo "Deployed ${{ github.event.workflow_run.head_sha || github.sha }}" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Close SSH again
-        if: always()
+        if: always() && steps.open.outcome != 'skipped'
         run: |
           aws lightsail put-instance-public-ports --instance-name "$INSTANCE_NAME" --port-infos \
             "fromPort=80,toPort=80,protocol=tcp,cidrs=0.0.0.0/0,ipv6Cidrs=::/0" \

@@ -5,6 +5,9 @@
 # Lightsail instances in us-west-2. No long-lived AWS keys are stored in GitHub.
 set -euo pipefail
 REPO="Tevaalgorithms/human-resilience-map"
+# GitHub's OIDC subject now embeds the immutable owner and repository IDs (shown by the
+# deploy workflow's "Show OIDC subject" step). Both forms are accepted.
+REPO_ID_SUB="repo:Tevaalgorithms@45029995/human-resilience-map@1411241901:environment:production"
 ROLE="hrm-github-deploy"
 REGION="us-west-2"
 ACCOUNT="$(aws sts get-caller-identity --query Account --output text)"
@@ -18,7 +21,7 @@ TRUST="$(cat <<JSON
 {"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Federated":"$OIDC"},
  "Action":"sts:AssumeRoleWithWebIdentity",
  "Condition":{"StringEquals":{"token.actions.githubusercontent.com:aud":"sts.amazonaws.com",
- "token.actions.githubusercontent.com:sub":"repo:${REPO}:environment:production"}}}]}
+ "token.actions.githubusercontent.com:sub":["repo:${REPO}:environment:production","${REPO_ID_SUB}"]}}}]}
 JSON
 )"
 POLICY="$(cat <<JSON
